@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -14,6 +14,17 @@ const names = [
   'derivon-creation',
 ];
 const issues = [];
+const discovered = [];
+for (const entry of await readdir(root, { withFileTypes: true })) {
+  if (!entry.isDirectory()) continue;
+  try {
+    await access(path.join(root, entry.name, 'SKILL.md'));
+    discovered.push(entry.name);
+  } catch {}
+}
+if (JSON.stringify(discovered.sort()) !== JSON.stringify([...names].sort())) {
+  issues.push(`expected exactly ${names.join(', ')}; found ${discovered.join(', ')}`);
+}
 
 for (const name of names) {
   const file = path.join(root, name, 'SKILL.md');

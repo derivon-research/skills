@@ -32,11 +32,13 @@ continue from, then inspect source citations and existing graph content.
    chronology, similarity, and co-occurrence are not derivations.
 5. Preserve distinct source arguments as parallel hyperedges. Split reusable
    intermediate results rather than hiding them inside a large edge.
-6. Calibrate each whole-step weight for the frozen audience using the shared 0-5
-   anchors and record the rationale/source.
+6. Calibrate each whole-step weight for the frozen audience using the Mindmap
+   model's 0-5 cognitive-cost anchors and record the rationale/source.
 7. Write independently useful object documents. Preserve the author's wording and
    examples when authorized and on-topic; reorganize them by object without
-   forcing paraphrase or copying unrelated chapter blocks.
+   forcing paraphrase or copying unrelated chapter blocks. Rich media is not an
+   import completion gate; when explicitly requested, follow the central
+   `derivon-mindmap` rich-document contract.
 8. Render Markdown, validate the candidate workspace, atomically write, and report
    exact graph/document changes for this chapter.
 9. Continue automatically. Pause only when evidence cannot settle a semantic

@@ -27,17 +27,18 @@ npx skills add derivon-research/skills \
 ```
 
 Simple workspace recipes require `derivon`, `jq`, and a POSIX shell. Windows
-users can use WSL or Git Bash. The bundled validator, renderer, and textbook
-exporter require Node.js but no workspace npm dependencies.
+users can use WSL or Git Bash. The bundled workspace validator, renderer,
+textbook exporter, and Teaching assessment-state tool require Node.js but no
+workspace npm dependencies.
 
 ## Skills
 
 | Skill | Use |
 | --- | --- |
-| `derivon-cli` | Mathematical model, installation, graph CRUD, queries, subgraphs, and apply. |
-| `derivon-mindmap` | Full workspace operations, object documents, replacements, validation, rendering, and route textbook export. |
+| `derivon-cli` | Application-independent mathematical model, installation, graph CRUD, queries, subgraphs, and apply. |
+| `derivon-mindmap` | Learning-model semantics, full workspace operations, object documents, replacements, validation, rendering, and route textbook export. |
 | `derivon-book-import` | Source-faithful chapter-by-chapter tutorial-book import. |
-| `derivon-teaching` | Read-only graph-grounded understanding assessment. |
+| `derivon-teaching` | Graph/document-read-only assessment with one local persisted state per workspace. |
 | `derivon-exploration` | Agent-led personal learning exploration that grows a graph. |
 | `derivon-creation` | Expert-led graph creation through dependency-ordered grilling. |
 
@@ -59,8 +60,9 @@ npm test
 ```
 
 `npm run build` creates the checked-in self-contained document renderer. Tests
-exercise real `derivon` and `jq` commands, workspace fixtures, route export, and a
-loopback preview server.
+exercise executable tools against real workspace fixtures, including assessment
+state transitions, route export, and a loopback preview server. Skill prose is
+reviewed directly; tests do not infer Agent behavior from keyword matches.
 
 ## License
 
@@ -77,12 +79,13 @@ npx skills add derivon-research/skills --all -g
 ```
 
 团队项目可以按需安装 `derivon-cli`、`derivon-mindmap` 和一个工作流 Skill，
-由 `skills-lock.json` 固定来源。普通工作区操作使用 `jq | derivon | jq`，不会用
-另一层 CRUD wrapper 隐藏 CLI；完整校验、Markdown/KaTeX/交互 HTML 发布，以及
-学习路线教材导出由自包含 Node 工具处理。
+由 `skills-lock.json` 固定来源。`derivon-cli` 只定义应用无关的数学模型和 CLI
+协议；学习语义与认知成本属于 `derivon-mindmap`。普通工作区操作使用
+`jq | derivon | jq`，不会用另一层 CRUD wrapper 隐藏 CLI；完整校验、
+Markdown/KaTeX/交互 HTML 发布，以及学习路线教材导出由自包含 Node 工具处理。
 
 - `derivon-book-import`：按章节忠实导入教程类书籍，只把来源中真实存在的推导写成超边。
-- `derivon-teaching`：只读拷打用户理解，不提前泄露答案，默认不持久化掌握状态。
+- `derivon-teaching`：不提前泄露答案，保持图与对象文档只读，并将本地用户的精简评估证据持久化到工作区唯一状态文件。
 - `derivon-exploration`：面向用户也不熟悉的领域，Agent 查证、解释、验证理解并持续完善个人图谱。
 - `derivon-creation`：面向领域熟练用户，按设计树访谈、审查并确认批次后写图。
 

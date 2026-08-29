@@ -1,57 +1,52 @@
-# Model and CLI Reference
+# Mathematical Model and CLI Reference
 
-## Core graph
+## Graph protocol
 
-A graph contains `points` and weighted directed B-hyperedges:
+The CLI owns and accepts `derivon.graph/v1`:
 
 ```json
 {
-  "points": [{"id":"A","data":{"label":"A"}}],
-  "hyperedges": [{"id":"h","weight":1.5,"tails":["A"],"head":"B","data":{}}]
+  "schema": "derivon.graph/v1",
+  "points": [{"id":"A"}, {"id":"B"}],
+  "hyperedges": [{"id":"h-ab","weight":1.5,"tails":["A"],"head":"B"}]
 }
 ```
 
-The optional graph schema is `derivon.graph/v1`. Point and hyperedge IDs share
-one ASCII namespace and match `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`. Hyperedge
-tails are unique point IDs, may be empty, and jointly imply one existing head.
-Opaque `data` does not participate in route solving.
+The `schema` field is optional; omission means exactly v1. Point and hyperedge
+IDs share one namespace and match `^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$`.
+`tails` contains unique point IDs, may be empty, and has no mathematical order.
+A hyperedge has exactly one existing head and an exact finite non-negative
+weight in tenths units no greater than `900719925474099.1`.
 
-A route is a set of hyperedges that can execute from a query-specific start set
-and reach every target. Its set cost counts each selected hyperedge once. The
-reported `executableOrder` is a valid order for learning the selected steps; the
-mathematical route remains a set.
+Points and hyperedges may carry optional opaque JSON `data`. Validation and route
+algorithms do not inspect it. Data commands address it with RFC 6901 JSON
+Pointer; the caller owns its schema and meaning.
 
-## AND, OR, and empty tails
+## B-hypergraph semantics
 
-`[A, B] -> C` is one joint step. Replacing it with `A -> C` and `B -> C` changes
-AND into OR. Two distinct `[A, B] -> C` hyperedges are alternative routes. An
-empty-tail hyperedge `[] -> A` is available in every query and incurs its weight;
-it does not mean that one learner already knows A.
+For `h = (T, v, w)`, all points in tail set `T` are jointly required before head
+`v` becomes available. `[A, B] -> C` is therefore not equivalent to the two
+hyperedges `A -> C` and `B -> C`. Multiple hyperedges with the same head are OR
+alternatives. Distinct hyperedge IDs remain distinct even when all structural
+fields match.
 
-## Learning-cost anchors
+An empty-tail hyperedge is enabled in every closure computation. It is separate
+from a query's explicit start set. Cycles, self-dependencies, empty tails,
+parallel hyperedges, isolated points, zero weights, and zero-weight cycles are
+valid.
 
-Weight means marginal effort to understand and verify the whole step after all
-tails are mastered.
+Given starts `S` and targets `T`, a route is a hyperedge set `R` whose restricted
+closure from `S` contains every target. Its set cost is:
 
-| Weight | Anchor |
-| ---: | --- |
-| 0 | Definition unfolding, notation translation, or immediate scoped equivalence. |
-| 1 | Direct application with no meaningful method choice. |
-| 2 | Routine combination or short standard calculation. |
-| 3 | Non-obvious observation, choice, interpretation, or construction. |
-| 4 | Key technique or substantial conceptual bridge needing guidance. |
-| 5 | Major learning unit or difficult argument that is itself a milestone. |
+```text
+cost(R) = sum(weight(h)) for h in R
+```
 
-This is a continuous application rubric, not an integer enum. Start with integers
-or halves. Use tenths only after comparison or observed evidence. Review weights
-at or above 4 for hidden reusable intermediates, but do not split a difficult yet
-atomic move mechanically. Importance, page count, tail count, and head difficulty
-are not formulas for weight.
+Each selected hyperedge is counted once even when reused by several targets or
+branches. Minimum set cost over a B-hypergraph is not ordinary shortest path and
+is NP-hard.
 
-Exploration may calibrate for one user. Creation and book import freeze a target
-audience and use that audience consistently.
-
-## Commands
+## Command surface
 
 ```text
 validate
@@ -63,21 +58,80 @@ apply
 ```
 
 Global options include `--input`, `--pretty`, resource limits, help, and version.
-Mutation output is the full graph. Query commands do not mutate input. `apply`
-accepts a typed operation array from a file and is atomic in process memory.
-
 Use `derivon <command> --help` and <https://docs.derivon.net/cli/> for the exact
-versioned contract. Prefer stable long flags in scripts.
+installed contract.
 
-## Route interpretation
+## Inspection and data
 
-A reachable route result includes:
+```sh
+derivon validate < graph.json
+derivon point list < graph.json
+derivon point get A < graph.json
+derivon point data get A < graph.json
+derivon point data get A /caller/owned/pointer < graph.json
+derivon hyperedge list < graph.json
+derivon hyperedge get h-ab < graph.json
+derivon hyperedge data get h-ab < graph.json
+```
 
-- `startPointIds`, `targetPointIds`, `pointIds`, and `hyperedgeIds`;
-- `executableOrder`;
-- `cost`, `lower`, and `upper`;
-- `provenOptimal`, search nodes, and elapsed milliseconds.
+`point get` and `hyperedge get` require structural IDs. For a caller-defined name
+inside opaque `data`, use `point list` or `hyperedge list` and filter the JSON
+array with `jq` according to the caller's own schema. Exact lookup may produce
+zero, one, or multiple objects. Require one unique ID before mutation; fuzzy
+matching is discovery only.
 
-An unreachable result contains target diagnoses and omits inapplicable route
-fields. A budget-limited reachable result may be a useful witness without being
-proven optimal. Increase the budget or label it explicitly.
+## Mutations
+
+```sh
+derivon point add B < graph.json
+derivon point remove B < graph.json
+derivon point remove B --cascade < graph.json
+derivon point rename B C < graph.json
+derivon point data set A /caller/owned/pointer --value 'null' < graph.json
+derivon point data remove A /caller/owned/pointer < graph.json
+
+derivon hyperedge add h-ab --tail A --head B --weight 1.5 < graph.json
+derivon hyperedge remove h-ab < graph.json
+derivon hyperedge rename h-ab h-ab-2 < graph.json
+derivon hyperedge set tails h-ab --tail A --tail B < graph.json
+derivon hyperedge set head h-ab C < graph.json
+derivon hyperedge set weight h-ab 2.5 < graph.json
+derivon hyperedge data set h-ab /caller/owned/pointer --value 'null' < graph.json
+derivon hyperedge data remove h-ab /caller/owned/pointer < graph.json
+```
+
+Mutations emit the complete transformed graph. Point rename updates incident
+references. Point removal fails when referenced unless `--cascade` is explicit.
+`set tails` with no `--tail` creates an empty tail. Data set/remove follows JSON
+Pointer rules and does not create missing intermediate parents.
+
+For a batch that must succeed or fail together:
+
+```sh
+derivon apply --operations operations.json < graph.json
+```
+
+`apply` accepts a typed operation array and validates every intermediate graph.
+
+## Queries and subgraphs
+
+Every `--start` and `--target` is repeatable. Omitting every `--start` requests an
+empty start set.
+
+```sh
+derivon query closure --start A --start B < graph.json
+derivon query route --start A --target C --target D < graph.json
+derivon query diagnose --start A --target C < graph.json
+
+derivon subgraph induced --point A --point B < graph.json
+derivon subgraph reachable --start A < graph.json
+derivon subgraph route --start A --target C < graph.json
+```
+
+A reachable route reports `startPointIds`, `targetPointIds`, `pointIds`,
+`hyperedgeIds`, `executableOrder`, `cost`, `lower`, `upper`, `provenOptimal`,
+search nodes, and elapsed milliseconds. A budget-limited result may contain a
+valid executable witness with `provenOptimal: false`; increase the budget or
+label it as approximate. An unreachable result reports target diagnoses and is a
+successful process result. Subgraph commands return an envelope containing
+`.graph` and `.selection`, not a bare graph or a mutation result.

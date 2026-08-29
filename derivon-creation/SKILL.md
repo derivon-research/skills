@@ -55,8 +55,8 @@ prove atomic identity.
 
 ## Use the document surface
 
-Preserve source fidelity and the owning object's graph role. For abstract
-technical content, consider a self-contained interactive HTML example when
-manipulation reveals the concept better than prose. Never add decorative
-interaction. After writing, name every updated document and prompt the user to
-view any new interactive example.
+Preserve source fidelity and the owning object's graph role. Rich media is not a
+creation-batch completion gate. When the user requests rich or interactive
+content, follow the central `derivon-mindmap` rich-document contract and never add
+decorative interaction. After writing, name every updated document and prompt the
+user to view any new interactive example.

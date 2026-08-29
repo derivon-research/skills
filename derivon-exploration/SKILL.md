@@ -56,9 +56,10 @@ explanation, examples, or cost instead of pretending completion.
 
 Non-destructive verified updates need no redundant approval. Deletion or broad
 restructuring still requires an impact summary and confirmation. Render,
-validate, and report every changed document. When an interactive HTML example
-would materially help an abstract technical concept, create it under the rich
-Mindmap document contract and prompt the user to open it.
+validate, and report every changed document. If static material proves
+insufficient during actual learning, or the user requests richer content, use the
+central `derivon-mindmap` rich-document contract. Prompt the user to open any new
+interactive example.
 
 ### 5. Offer valuable next questions
 
