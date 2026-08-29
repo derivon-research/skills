@@ -26,6 +26,21 @@ npx skills add derivon-research/skills \
   --agent '*' -y
 ```
 
+Installed copies do not update automatically when this repository changes. After
+a new version reaches `main`, update global installations with:
+
+```sh
+npx skills update --global -y
+```
+
+Update a project-scoped installation and its lock state from inside that project:
+
+```sh
+npx skills update --project -y
+```
+
+Start a new Agent session after updating so it loads the new skill instructions.
+
 Simple workspace recipes require `derivon`, `jq`, and a POSIX shell. Windows
 users can use WSL or Git Bash. The bundled workspace validator, renderer,
 textbook exporter, and Teaching assessment-state tool require Node.js but no
@@ -77,6 +92,20 @@ MIT. See [LICENSE](LICENSE) and [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md)
 ```sh
 npx skills add derivon-research/skills --all -g
 ```
+
+GitHub 仓库更新后，已安装的 Skill 不会自动同步。新版本进入 `main` 后，全局安装执行：
+
+```sh
+npx skills update --global -y
+```
+
+项目级安装应在项目目录中执行，并同步项目 lock 状态：
+
+```sh
+npx skills update --project -y
+```
+
+更新后重新启动 Agent 会话，确保新指令被重新加载。
 
 团队项目可以按需安装 `derivon-cli`、`derivon-mindmap` 和一个工作流 Skill，
 由 `skills-lock.json` 固定来源。`derivon-cli` 只定义应用无关的数学模型和 CLI
