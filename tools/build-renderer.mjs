@@ -1,0 +1,36 @@
+#!/usr/bin/env node
+
+import { build } from 'esbuild';
+import { chmod, mkdir, readFile } from 'node:fs/promises';
+import path from 'node:path';
+
+const outfile = new URL('../derivon-mindmap/scripts/render-documents.mjs', import.meta.url);
+await mkdir(new URL('../derivon-mindmap/scripts/', import.meta.url), { recursive: true });
+await build({
+  entryPoints: [new URL('./render-documents.source.mjs', import.meta.url).pathname],
+  outfile: outfile.pathname,
+  bundle: true,
+  platform: 'node',
+  format: 'esm',
+  target: 'node20',
+  plugins: [{
+    name: 'inline-katex-fonts',
+    setup(buildContext) {
+      buildContext.onLoad({ filter: /katex\.min\.css$/ }, async ({ path: cssPath }) => {
+        let css = await readFile(cssPath, 'utf8');
+        css = css.replace(/src:(url\([^)]+\.woff2\) format\("woff2"\))(?:,[^}]*)}/g, 'src:$1}');
+        const fontUrls = [...css.matchAll(/url\((fonts\/[^)]+)\)/g)].map((match) => match[1]);
+        for (const fontUrl of new Set(fontUrls)) {
+          const bytes = await readFile(path.resolve(path.dirname(cssPath), fontUrl));
+          const mime = fontUrl.endsWith('.woff2') ? 'font/woff2' : 'font/woff';
+          css = css.replaceAll(`url(${fontUrl})`, `url(data:${mime};base64,${bytes.toString('base64')})`);
+        }
+        return { contents: `export default ${JSON.stringify(css)};`, loader: 'js' };
+      });
+    },
+  }],
+  banner: { js: '#!/usr/bin/env node' },
+  legalComments: 'eof',
+});
+await chmod(outfile, 0o755);
+console.log(`Built ${outfile.pathname}`);

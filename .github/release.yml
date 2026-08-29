@@ -1,0 +1,14 @@
+changelog:
+  exclude:
+    labels:
+      - ignore-for-release
+  categories:
+    - title: Skills
+      labels:
+        - skill
+    - title: Tools
+      labels:
+        - tooling
+    - title: Other Changes
+      labels:
+        - '*'

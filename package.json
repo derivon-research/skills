@@ -1,0 +1,17 @@
+{
+  "name": "derivon-skills-development",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "scripts": {
+    "build": "node tools/build-renderer.mjs",
+    "check:skills": "node tools/validate-skills.mjs",
+    "test": "npm run build && npm run check:skills && node --test tests/*.test.mjs"
+  },
+  "devDependencies": {
+    "esbuild": "^0.25.9",
+    "katex": "^0.18.0",
+    "marked": "^16.4.2",
+    "marked-katex-extension": "^5.1.12"
+  }
+}

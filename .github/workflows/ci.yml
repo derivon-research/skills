@@ -1,0 +1,23 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - uses: dtolnay/rust-toolchain@stable
+      - name: Install derivon CLI
+        run: cargo install derivon-cli --version 0.1.1 --locked
+      - run: npm ci
+      - run: npm test
+      - name: Verify skills installer discovery
+        run: npx --yes skills add "$GITHUB_WORKSPACE" --list
