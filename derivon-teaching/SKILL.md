@@ -1,26 +1,29 @@
 ---
 name: derivon-teaching
-description: Assess a user's understanding of target concepts through graph-grounded, non-leading grilling rounds. Use for quizzes, oral examinations, mastery checks, misconception diagnosis, prerequisite probing, or teaching assessment over an existing Derivon Mindmap. Read-only by default.
+description: Assess a learner's understanding of target concepts through graph-grounded, non-leading grilling rounds. Use for quizzes, oral examinations, mastery checks, misconception diagnosis, prerequisite probing, or teaching assessment over an existing Derivon Mindmap. Keeps the graph and documents read-only while persisting learner assessment evidence between sessions.
 ---
 
 # Derivon Teaching
 
-Use `derivon-cli` and `derivon-mindmap` with this skill. Assess understanding; do
-not edit the graph or persist learner state unless the user explicitly requests a
-separate artifact.
+Use `derivon-cli` and `derivon-mindmap` with this skill. Keep the graph,
+manifest, and object documents read-only. Persist only learner assessment state
+through [the assessment-state protocol](references/assessment-state.md).
 
 Map the assessment as a diagnostic tree. Graph prerequisites shape candidate
-branches, but user answers decide which branches remain open.
+branches, but learner answers decide which branches remain open.
 
-## Establish the target
+## Establish or resume the learner
 
 1. Read the target concept documents, relevant derivation documents, and their
    tails. Do not grade facts the graph does not contain; report coverage gaps.
-2. Ask for target concepts and let the user name content they believe they know.
-3. Start with a target-level discrimination, application, transfer, case, or
-   scenario task. Do not begin by asking for verbatim definitions.
-4. If the target is not demonstrated, expand backward through relevant
-   hyperedges. Sample claimed known concepts instead of treating them as facts.
+2. Ask for target concepts and content the learner believes they know.
+3. Load and reconcile the workspace's single local Teaching state. Treat prior
+   statuses as diagnostic evidence, not facts; sample route-critical claimed
+   starts.
+4. Start one active assessment for the target set. Close or explicitly continue an
+   existing active assessment before changing targets.
+5. Begin with target-level discrimination, application, transfer, case, or
+   scenario work. Do not begin with verbatim definitions.
 
 ## Work in rounds
 
@@ -30,29 +33,42 @@ highest information value; queue the rest.
 
 Format each round as numbered questions separated by horizontal rules. Do not
 provide recommended answers, leading hints, conclusions to repeat, or answer
-shapes before the user responds. Wait for the complete round.
+shapes before the learner responds. Wait for the complete round.
 
 After the response:
 
-- mark each item `demonstrated`, `partial`, or `not demonstrated`;
-- cite concrete evidence from the user's reasoning;
+- mark each assessed point `demonstrated`, `partial`, or `not-demonstrated`;
+- cite concise concrete evidence from the learner's reasoning without storing the
+  raw response;
 - explain the exact gap without treating unfamiliar wording as failure;
 - retry with a different task type when needed;
-- recompute the diagnostic frontier and relevant route.
+- recompute the diagnostic frontier and relevant route;
+- record the complete evaluated round atomically with its basis object IDs and
+  expected state revision.
 
-A reply such as “I understand” or a copied definition is not mastery evidence.
+A reply such as "I understand" or a copied definition is not mastery evidence.
 At least one task must require use, comparison, prediction, boundary analysis, or
-transfer beyond text just supplied by the Agent.
+transfer beyond text just supplied by the Agent. Current status may move in either
+direction; preserve prior rounds rather than overwriting their evidence.
+
+If the graph object or document basis changes, reconcile fingerprints and treat
+stale evidence as historical until the learner is verified again. Never copy
+assessment status into point/hyperedge data, starts, replacements, or object
+documents.
 
 ## Finish
 
-Stop when the targets are demonstrated, the user stops, or graph/source coverage
-prevents a defensible judgment. Return a conversation-local report:
+Stop when the targets are demonstrated, the learner stops, or graph/source
+coverage prevents a defensible judgment. Record the final complete round, close
+the active assessment when appropriate, and return:
 
 - demonstrated concepts and evidence;
 - partial concepts and exact gaps;
 - not-yet-demonstrated concepts;
+- stale evidence that needs revalidation;
 - graph coverage limitations;
-- recommended next learning route or review tasks.
+- recommended next route or review tasks;
+- the assessment state path and its privacy/version-control boundary.
 
-Do not write scores, progress, starts, or mastery flags into the shared graph.
+Do not modify `.gitignore`, commit Teaching state, delete history, or reset the
+state file without explicit authorization.

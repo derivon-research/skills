@@ -27,11 +27,11 @@ complete HTML page or cannot reasonably retain a Markdown source.
 
 ## Interactive-example gate
 
-Consider interaction actively for abstract mathematics, computing, algorithms,
-data structures, transformations, state machines, simulations, and technical
-systems. Add it only when changing input, comparing representations, testing a
-boundary, observing state, or solving a case teaches more directly than static
-text.
+Apply this gate when the user requests interactive material or static content has
+proved insufficient during actual learning. Do not make a rich-media pass an
+import or creation completion requirement. Add interaction only when changing
+input, comparing representations, testing a boundary, observing state, or solving
+a case teaches more directly than static text.
 
 Every interaction needs:
 
