@@ -63,9 +63,10 @@ node "$SKILL_DIR/scripts/render-documents.mjs" --write <workspace> <object-id>
 node "$SKILL_DIR/scripts/validate-workspace.mjs" <workspace>
 ```
 
-Preserve an existing object's format. New objects default to Markdown. Rich
-content and interaction remain optional; when used, follow the central rich
-object contract rather than duplicating workflow-specific rules.
+Preserve an existing object's format. New objects default to Markdown. Follow the
+central rich-object contract for learner-visible output: use native Markdown
+before static local images, raw HTML, or interaction; comments and placeholders
+never count as visible content. Rich content and interaction remain optional.
 
 After each write cycle, report graph changes and every updated document with
 object ID/label, path, and reason. If an interactive example was added, name it

@@ -23,8 +23,8 @@ continue from, then inspect source citations and existing graph content.
 
 1. Read the complete current chapter and the existing canonical point registry.
 2. Extract reusable concepts, exact definitions/scope, genuine arguments or
-   constructions, complete prerequisites, examples, source locations, and
-   uncertainty.
+   constructions, complete prerequisites, examples, meaning-bearing figures,
+   source locations, and uncertainty.
 3. Reconcile identity by meaning, not labels. Do not let a previous composite
    point become canonical merely because it already exists.
 4. Form an edge only when the source supplies a real step by which all tails
@@ -36,13 +36,40 @@ continue from, then inspect source citations and existing graph content.
    model's 0-5 cognitive-cost anchors and record the rationale/source.
 7. Write independently useful object documents. Preserve the author's wording and
    examples when authorized and on-topic; reorganize them by object without
-   forcing paraphrase or copying unrelated chapter blocks. Rich media is not an
-   import completion gate; when explicitly requested, follow the central
-   `derivon-mindmap` rich-document contract.
+   forcing paraphrase or copying unrelated chapter blocks. Follow the central
+   `derivon-mindmap` rich-document contract and its least-powerful representation
+   rule. Meaning-bearing source figures are source fidelity, not an optional
+   rich-media pass.
 8. Render Markdown, validate the candidate workspace, atomically write, and report
    exact graph/document changes for this chapter.
 9. Continue automatically. Pause only when evidence cannot settle a semantic
    ambiguity or when a destructive revision of prior work needs confirmation.
+
+## Preserve meaning-bearing figures
+
+During the existing complete-chapter read, make a lightweight figure pass. A
+figure is meaning-bearing when omitting it damages an object's independent
+understanding, a source-backed derivation, or fidelity to the source. Map each
+such figure to the concept or derivation documents it actually supports. A
+user-requested figure is required even when it is not otherwise essential.
+
+For authorized readable material, prefer exact extraction or faithful cropping.
+Do not crop labels, legends, connections, or context needed for interpretation.
+Redraw only when the source asset is unavailable or unreadable, or when a new
+representation has a clear teaching benefit; verify every reconstructed semantic
+detail against the source instead of inventing from domain expectations.
+
+Store each figure in every consuming object's directory and insert it as a
+relative Markdown image with meaningful alt text and a visible caption/source.
+Use raw HTML only when Markdown cannot provide a required capability. An HTML
+comment, TODO, empty element, or unavailable-image note is not a figure. If a
+required figure cannot be obtained faithfully, report that object as blocked
+instead of inserting a placeholder and claiming the chapter complete.
+
+At chapter completion, report imported assets and whether each was extracted,
+cropped, or redrawn; report omitted decorative figures with reasons and all
+blockers. Do not create a persistent figure inventory or a second whole-book
+media pass.
 
 ## Enforce atomic concepts
 
