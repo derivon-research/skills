@@ -1,6 +1,7 @@
 import { Marked } from 'marked';
 import markedKatex from 'marked-katex-extension';
 import katexCss from 'katex/dist/katex.min.css';
+import { auditDocumentMedia, formatMediaIssue, MediaPreflightError } from './media-preflight.mjs';
 import { readFile, realpath, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
@@ -9,6 +10,7 @@ const usage = `Usage:
   node render-documents.mjs [--write] [--manifest <candidate.json>] <workspace> [object-id-or-document ...]
 
 Without --write, reports source/publication drift and exits 1 when drift exists.
+Both modes preflight local media and offline HTML/CSS dependencies before output.
 The script is self-contained and needs no workspace npm dependencies.`;
 const args = process.argv.slice(2);
 const write = takeFlag(args, '--write');
@@ -39,34 +41,63 @@ const markdownRenderer = new Marked(
   { gfm: true },
   markedKatex({ throwOnError: false, strict: false }),
 );
-let drift = 0;
+const publications = [];
+const mediaIssues = [];
 for (const object of selected) {
-  if (object.data?.format !== 'markdown') continue;
   const directory = await safeWorkspacePath(workspaceRoot, object.data.document);
-  const sourcePath = path.join(directory, 'document.md');
+  const htmlOnly = object.data?.format === 'html';
+  const sourceName = htmlOnly ? 'index.html' : 'document.md';
+  const sourcePath = path.join(directory, sourceName);
   const outputPath = path.join(directory, 'index.html');
-  const markdown = await readFile(sourcePath, 'utf8');
-  const title = object.kind === 'concept' ? object.data.label : `Derivation ${object.id}`;
-  const expected = renderDocument(markdown, title || object.id);
-  let current = null;
+  const source = await readFile(sourcePath, 'utf8');
   try {
-    current = await readFile(outputPath, 'utf8');
+    const media = await auditDocumentMedia({
+      markdown: source,
+      objectId: object.id,
+      sourcePath: `${object.data.document}/${sourceName}`,
+      objectDirectory: directory,
+    });
+    publications.push({ object, markdown: source, outputPath, media, htmlOnly });
   } catch (error) {
-    if (error.code !== 'ENOENT') throw error;
-  }
-  if (current === expected) continue;
-  drift += 1;
-  if (write) {
-    await writeFile(outputPath, expected, 'utf8');
-    console.log(`Rendered ${path.relative(workspaceRoot, outputPath)}`);
-  } else {
-    console.error(`Drift: ${path.relative(workspaceRoot, outputPath)}`);
+    if (!(error instanceof MediaPreflightError)) throw error;
+    mediaIssues.push(...error.issues);
   }
 }
 
-if (!drift) console.log(`Publication is synchronized for ${selected.length} selected object(s).`);
-else if (!write) process.exitCode = 1;
-else console.log(`Rendered ${drift} document(s).`);
+if (mediaIssues.length) {
+  console.error(mediaIssues.map(formatMediaIssue).join('\n\n'));
+  process.exitCode = 1;
+} else {
+  let drift = 0;
+  for (const { object, markdown, outputPath, media, htmlOnly } of publications) {
+    if (!htmlOnly) {
+      const title = object.kind === 'concept' ? object.data.label : `Derivation ${object.id}`;
+      const expected = renderDocument(markdown, title || object.id);
+      let current = null;
+      try {
+        current = await readFile(outputPath, 'utf8');
+      } catch (error) {
+        if (error.code !== 'ENOENT') throw error;
+      }
+      if (current !== expected) {
+        drift += 1;
+        if (write) {
+          await writeFile(outputPath, expected, 'utf8');
+          console.log(`Rendered ${object.data.document}/index.html`);
+        } else {
+          console.error(`Drift: ${object.data.document}/index.html`);
+        }
+      }
+    }
+    if (media.assets.length) {
+      console.log(`Media [${object.id}] ${media.assets.length} local image(s): ${media.assets.join(', ')}`);
+    }
+  }
+
+  if (!drift) console.log(`Publication is synchronized for ${selected.length} selected object(s).`);
+  else if (!write) process.exitCode = 1;
+  else console.log(`Rendered ${drift} document(s).`);
+}
 
 function takeFlag(values, flag) {
   const index = values.indexOf(flag);
