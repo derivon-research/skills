@@ -55,8 +55,9 @@ provisional. If understanding remains incomplete, repair prerequisites,
 explanation, examples, or cost instead of pretending completion.
 
 Non-destructive verified updates need no redundant approval. Deletion or broad
-restructuring still requires an impact summary and confirmation. Render,
-validate, and report every changed document. If static material proves
+restructuring still requires an impact summary and confirmation. Crosslink exact
+changed objects, render, validate, and report every source, publication, and
+inserted-reference change. If static material proves
 insufficient during actual learning, or the user requests richer content, use the
 central `derivon-mindmap` rich-document contract. Prompt the user to open any new
 interactive example.

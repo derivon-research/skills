@@ -40,8 +40,10 @@ continue from, then inspect source citations and existing graph content.
    `derivon-mindmap` rich-document contract and its least-powerful representation
    rule. Meaning-bearing source figures are source fidelity, not an optional
    rich-media pass.
-8. Render Markdown, validate the candidate workspace, atomically write, and report
-   exact graph/document changes for this chapter.
+8. Crosslink exact changed objects against the candidate manifest, render
+   Markdown, validate the candidate workspace, atomically write, and report every
+   graph, source-document, publication, and inserted-reference change for this
+   chapter.
 9. Continue automatically. Pause only when evidence cannot settle a semantic
    ambiguity or when a destructive revision of prior work needs confirmation.
 

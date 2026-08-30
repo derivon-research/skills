@@ -9,6 +9,7 @@ const repo = path.resolve(new URL('..', import.meta.url).pathname);
 const validator = path.join(repo, 'derivon-mindmap/scripts/validate-workspace.mjs');
 const renderer = path.join(repo, 'derivon-mindmap/scripts/render-documents.mjs');
 const exporter = path.join(repo, 'derivon-mindmap/scripts/export-route-textbook.mjs');
+const crosslink = path.join(repo, 'derivon-mindmap/scripts/crosslink-documents.mjs');
 
 const IMAGES = {
   png: 'iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=',
@@ -123,14 +124,16 @@ test('self-contained renderer preserves raw HTML and renders offline KaTeX', asy
   assert.equal(synchronized.status, 0, synchronized.stderr);
 });
 
-test('renderer bundle starts without repository dependencies', async (t) => {
-  const root = await mkdtemp(path.join(os.tmpdir(), 'derivon-renderer-bundle-'));
+test('generated tool bundles start without repository dependencies', async (t) => {
+  const root = await mkdtemp(path.join(os.tmpdir(), 'derivon-tool-bundles-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  const standalone = path.join(root, 'render-documents.mjs');
-  await copyFile(renderer, standalone);
-  const result = run(standalone, ['--help'], { cwd: root });
-  assert.equal(result.status, 0, result.stderr);
-  assert.match(result.stdout, /Without --write/);
+  for (const script of [renderer, crosslink, exporter]) {
+    const standalone = path.join(root, path.basename(script));
+    await copyFile(script, standalone);
+    const result = run(standalone, ['--help'], { cwd: root });
+    assert.equal(result.status, 0, `${path.basename(script)}: ${result.stderr}`);
+    assert.match(result.stdout, /Usage:/);
+  }
 });
 
 test('renderer audits HTML-only publications without rewriting them', async (t) => {
@@ -191,6 +194,30 @@ test('exporter follows executable order, preserves assets, and protects output',
   const unreachable = run(exporter, [root, '--output', path.join(root, 'no-route'), '--start', 'A', '--target', 'D']);
   assert.equal(unreachable.status, 1);
   assert.match(unreachable.stderr, /unreachable/i);
+});
+
+test('exporter rewrites object links and copies recursive reference closure without changing route chapters', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'docs/h-main/document.md'), '# Main\n\nUse [D](../d/index.html#details) for comparison.\n');
+  await writeFile(path.join(root, 'docs/d/document.md'), '# D\n\nSee [Alternative](../h-alt/index.html).\n');
+  await writeFile(path.join(root, 'docs/h-alt/document.md'), '# Alternative\n\nReturn to [D](../d/index.html).\n');
+  assert.equal(run(renderer, ['--write', root]).status, 0);
+
+  const output = path.join(root, 'linked-textbook');
+  const exported = run(exporter, [root, '--output', output, '--start', 'A', '--start', 'B', '--target', 'C']);
+  assert.equal(exported.status, 0, exported.stderr);
+  const route = JSON.parse(await readFile(path.join(output, 'route.json'), 'utf8'));
+  assert.deepEqual(route.chapters.map((entry) => entry.id), ['A', 'B', 'h-main', 'C']);
+  assert.deepEqual(route.references.map((entry) => entry.id), ['D', 'h-alt']);
+  assert.deepEqual(route.references[0].referrerIds, ['h-main', 'h-alt']);
+  assert.match(await readFile(path.join(output, 'objects/h-main/index.html'), 'utf8'), /href="\.\.\/D\/index\.html#details"/);
+  assert.match(await readFile(path.join(output, 'objects/D/index.html'), 'utf8'), /Referenced from/);
+  assert.match(await readFile(path.join(output, 'index.html'), 'utf8'), /<h2>References<\/h2>/);
+
+  const bounded = run(exporter, [root, '--output', path.join(root, 'bounded'), '--start', 'A', '--start', 'B', '--target', 'C', '--max-references', '0']);
+  assert.equal(bounded.status, 1);
+  assert.match(bounded.stderr, /exceeds --max-references 0/);
 });
 
 test('exporter requires explicit opt-in for a budget-limited route', async (t) => {

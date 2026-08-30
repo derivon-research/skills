@@ -41,7 +41,9 @@ decisions, not facts an Agent can verify.
 5. Show the semantic batch summary. When the frontier is empty, explicitly ask
    the user to confirm shared understanding and authorize this batch.
 6. Apply with `derivon apply` and atomic manifest replacement, create/update
-   documents, render, validate, and report exact graph and document changes.
+   documents, crosslink exact changed objects against the candidate manifest,
+   render, validate, and report exact graph, source-document, publication, and
+   inserted-reference changes.
 7. Audit routes, isolated points, points not used as tails, unresolved identities,
    and evidence that needs a separate relation layer. Propose but do not write the
    next batch.

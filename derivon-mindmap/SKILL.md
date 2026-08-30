@@ -55,13 +55,19 @@ rewiring require confirmation.
 
 ## Publish documents
 
-For Markdown objects, `document.md` is source and `index.html` is publication:
+For Markdown objects, `document.md` is source and `index.html` is publication.
+Crosslink exact changed objects before rendering:
 
 ```sh
-node "$SKILL_DIR/scripts/render-documents.mjs" <workspace> <object-id>
-node "$SKILL_DIR/scripts/render-documents.mjs" --write <workspace> <object-id>
+node "$SKILL_DIR/scripts/crosslink-documents.mjs" --write <workspace> <object-id>...
+node "$SKILL_DIR/scripts/render-documents.mjs" --write <workspace> <object-id>...
 node "$SKILL_DIR/scripts/validate-workspace.mjs" <workspace>
 ```
+
+Use `--manifest <candidate.json>` for both document tools before an atomic
+manifest replacement. Crosslinks are reading navigation only and never authorize
+graph edits. Check a broad migration with `--all --json`; do not run
+`--write --all` without an impact summary and confirmation.
 
 Preserve an existing object's format. New objects default to Markdown. Follow the
 central rich-object contract for learner-visible output: use native Markdown
@@ -80,7 +86,8 @@ node "$SKILL_DIR/scripts/export-route-textbook.mjs" <workspace> \
 ```
 
 The exporter follows solver `executableOrder`, copies complete object directories,
-adds navigation, emits `route.json`, protects existing output, and refuses an
-unproven route unless `--allow-approximate` is explicit. Keep the loopback server
+rewrites known workspace links, copies their bounded transitive reference closure,
+adds route/reference navigation, emits `route.json`, protects existing output, and
+refuses an unproven route unless `--allow-approximate` is explicit. Keep the loopback server
 running, inspect representative desktop and narrow pages with available browser
 tooling, and give the user the URL, output path, and stop command.

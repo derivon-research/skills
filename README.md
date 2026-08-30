@@ -42,9 +42,9 @@ npx skills update --project -y
 Start a new Agent session after updating so it loads the new skill instructions.
 
 Simple workspace recipes require `derivon`, `jq`, and a POSIX shell. Windows
-users can use WSL or Git Bash. The bundled workspace validator, renderer,
-textbook exporter, and Teaching assessment-state tool require Node.js but no
-workspace npm dependencies.
+users can use WSL or Git Bash. The bundled workspace validator, crosslinker,
+renderer, textbook exporter, and Teaching assessment-state tool require Node.js
+but no workspace npm dependencies.
 
 ## Skills
 
@@ -74,9 +74,10 @@ npm install
 npm test
 ```
 
-`npm run build` creates the checked-in self-contained document renderer. Tests
-exercise executable tools against real workspace fixtures, including assessment
-state transitions, route export, and a loopback preview server. Skill prose is
+`npm run build` creates the checked-in self-contained crosslinker, renderer, and
+textbook exporter. Tests exercise executable tools against real workspace
+fixtures, including assessment state transitions, route export, and a loopback
+preview server. Skill prose is
 reviewed directly; tests do not infer Agent behavior from keyword matches.
 
 ## License
@@ -111,7 +112,8 @@ npx skills update --project -y
 由 `skills-lock.json` 固定来源。`derivon-cli` 只定义应用无关的数学模型和 CLI
 协议；学习语义与认知成本属于 `derivon-mindmap`。普通工作区操作使用
 `jq | derivon | jq`，不会用另一层 CRUD wrapper 隐藏 CLI；完整校验、
-Markdown/KaTeX/交互 HTML 发布，以及学习路线教材导出由自包含 Node 工具处理。
+概念首次提及交叉引用、Markdown/KaTeX/交互 HTML 发布，以及学习路线教材导出由自包含
+Node 工具处理。
 
 - `derivon-book-import`：按章节忠实导入教程类书籍，只把来源中真实存在的推导写成超边。
 - `derivon-teaching`：不提前泄露答案，保持图与对象文档只读，并将本地用户的精简评估证据持久化到工作区唯一状态文件。

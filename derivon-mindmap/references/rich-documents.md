@@ -36,6 +36,22 @@ Use the least powerful representation that carries the teaching meaning:
 5. Use HTML-only only when the source is inherently a complete page or cannot
    reasonably retain Markdown source.
 
+## Cross-reference documented concepts
+
+On the first meaningful prose mention of another canonical concept, link its
+visible label to that concept's `index.html` with a standard relative link, for
+example `[Agent Loop](../concept-agent-loop/index.html)`. Compute the href from
+manifest document paths; never guess it from an object ID. The link is reading
+navigation only, not a prerequisite, derivation, containment, replacement, or
+backlink.
+
+After writing a document batch, run `crosslink-documents.mjs --write` for the
+exact changed object IDs before rendering. It links unambiguous exact canonical
+labels in prose while leaving headings, code, math, existing links, raw HTML, and
+image alt text alone. Add semantic aliases manually. Report every source document
+changed by crosslinking. Whole-workspace `--all` use requires a check report and
+confirmation before `--write --all`.
+
 ## Static figures and owned assets
 
 Put every Agent-authored media dependency inside the consuming object's document
