@@ -77,8 +77,9 @@ npm test
 `npm run build` creates the checked-in self-contained crosslinker, renderer, and
 textbook exporter. Tests exercise executable tools against real workspace
 fixtures, including assessment state transitions, route export, and a loopback
-preview server. Skill prose is
-reviewed directly; tests do not infer Agent behavior from keyword matches.
+preview server. Skill prose is reviewed directly; tests do not infer Agent
+behavior from keyword matches. Manual behavior regressions, semantic rubrics,
+and calibrated positive examples live under `evals/`.
 
 ## License
 

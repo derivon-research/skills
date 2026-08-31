@@ -7,12 +7,15 @@ learning and explanation. These meanings belong to Mindmap, not to the core CLI.
 
 - A point is one reusable state of understanding or established claim. Its label
   and object document define scope for a target audience.
-- One hyperedge is one genuine step by which every tail jointly supports one
-  head. Its document explains how each tail contributes and what move establishes
-  the head.
-- Separate hyperedges are alternative derivations. Parallel hyperedges remain
-  distinct because their argument, source, explanation, or audience cost may
-  differ.
+- One hyperedge is one problem-led response in which the full tail set is jointly
+  required for one head. Its document exposes the historical, logical, or
+  pedagogical problem pressure and performs one identifiable resolving move that
+  depends on the full tail set and establishes the head.
+- Problem pressure remains inside the hyperedge by default. It becomes a point
+  only when understanding the problem is independently learnable and reusable.
+- Distinct responses to the same pressure may fan out to different heads.
+  Parallel hyperedges share tails and head but remain distinct because their
+  argument, source, explanation, or audience cost differs.
 - An empty-tail hyperedge is a real entrance only when its head is learnable
   without graph prerequisites. It still has a weight and is not a substitute for
   a route query's learner-known start set.
@@ -32,14 +35,19 @@ term stays one point only when evidence supports one indivisible understanding
 state. Shortening a label is not a semantic split.
 
 A hyperedge must expose reusable intermediate results instead of hiding several
-substantial moves in one step. Every tail must contribute jointly. Do not merge
-alternative routes into one AND tail set. Cycles, empty tails, and high weights
-are review signals, not automatic errors.
+substantial moves in one step. It contains one problem pressure and one
+identifiable resolving move. The full tail set must be jointly necessary:
+removing any tail breaks the problem-to-response account. A later viewpoint uses
+an earlier viewpoint as a tail only when it actually summarizes,
+refines, rejects, or otherwise reasons from it; chronology supplies no tail. Do
+not merge alternative routes into one AND tail set. Cycles, empty tails, and high
+weights are review signals, not automatic errors.
 
 ## Mindmap weight rubric
 
 A hyperedge weight is the target learner's marginal cognitive cost for
-understanding and verifying the whole step after every tail is mastered.
+understanding the problem pressure and verifying the whole resolving move after
+every tail is mastered.
 
 | Weight | Mindmap anchor |
 | ---: | --- |
@@ -63,8 +71,9 @@ the owning hyperedge document.
 
 ## Documents own meaning
 
-The graph stores compact structure; object documents carry definitions,
-boundaries, evidence, provenance, uncertainty, examples, and complete derivation
-arguments. Read the point documents for every tail and head together with the
+The graph stores compact structure. Concept documents state and delimit an
+understanding; derivation documents own the complete problem-to-response account.
+Together they carry evidence, provenance, uncertainty, examples, and weight
+rationale. Read the point documents for every tail and head together with the
 hyperedge document before changing a derivation. A structural edit without
 synchronized owning documents is incomplete.

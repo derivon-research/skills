@@ -1,16 +1,8 @@
 # Rich Object Documents
 
-## Document roles
-
-A concept document identifies one reusable understanding state: define it,
-delimit its scope, connect it to prerequisites, and provide an example or boundary
-when that helps. A derivation document explains one whole joint step: how every
-tail contributes, what move the edge supplies, and exactly what head is reached.
-Never assume the head as evidence.
-
-Preserve source meaning. Authorized source wording may be reused directly when it
-fits the object. Otherwise quote only what is needed and adapt faithfully with a
-source location. Do not turn chapter adjacency into a graph relation.
+Read the [object document contract](object-documents.md) first. This reference
+covers presentation choices beyond ordinary prose while preserving the object's
+concept or derivation role.
 
 ## Author for the visible publication
 

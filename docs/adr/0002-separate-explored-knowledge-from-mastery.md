@@ -1,0 +1,3 @@
+# Separate explored knowledge from mastery
+
+An Exploration Mindmap records source-backed knowledge investigated with the learner, not only concepts the learner has demonstrated. Exploration may therefore insert one bounded, question-driven teaching batch before verification; subsequent non-recall evidence repairs the explanation and prerequisites and changes personal weights from provisional to observed. Broad goals establish workspace direction but do not authorize a speculative roadmap graph. Mastery evidence remains separate from graph membership so object documents can teach material before the learner masters it and graph structure does not become a stale assessment ledger.

@@ -16,6 +16,8 @@ Before editing, read:
   edit or weight decision
 - [Unix workspace recipes](references/unix-recipes.md) before inspecting or
   writing a workspace
+- [Object document contract](references/object-documents.md) before creating or
+  revising any concept or derivation source document
 - [Rich object document guidance](references/rich-documents.md) when the user
   requests rich content or when static material proves insufficient during
   actual learning
@@ -70,9 +72,10 @@ graph edits. Check a broad migration with `--all --json`; do not run
 `--write --all` without an impact summary and confirmation.
 
 Preserve an existing object's format. New objects default to Markdown. Follow the
-central rich-object contract for learner-visible output: use native Markdown
-before static local images, raw HTML, or interaction; comments and placeholders
-never count as visible content. Rich content and interaction remain optional.
+central object-document contract for every learner-visible source. Use native
+Markdown before static local images, raw HTML, or interaction; comments and
+placeholders never count as visible content. Rich content and interaction remain
+optional.
 
 After each write cycle, report graph changes and every updated document with
 object ID/label, path, and reason. If an interactive example was added, name it
