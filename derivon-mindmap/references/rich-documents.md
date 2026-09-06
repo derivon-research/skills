@@ -6,7 +6,7 @@ concept or derivation role.
 
 ## Author for the visible publication
 
-Preserve `data.format`. New objects default to:
+Documents are Markdown only. Every object owns:
 
 ```text
 <document-directory>/document.md   # authoring source

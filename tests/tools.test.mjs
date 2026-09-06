@@ -44,17 +44,17 @@ async function fixture() {
   await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify({
     schema: 'derivon.workspace/v1',
     document: { title: 'Fixture', description: 'Route export fixture' },
-    tags: [{ id: 'starting', label: 'Starting points', description: 'Concepts with no premises.' }],
+    tags: [{ id: 'starting', label: 'Starting points' }],
     graph: {
       points: [
-        { id: 'A', data: { label: 'A', document: 'docs/a', format: 'markdown', tags: ['starting'] } },
-        { id: 'B', data: { label: 'B', document: 'docs/b', format: 'markdown', tags: ['starting'] } },
-        { id: 'C', data: { label: 'C', document: 'docs/c', format: 'markdown' } },
-        { id: 'D', data: { label: 'D', document: 'docs/d', format: 'markdown' } },
+        { id: 'A', data: { label: 'A', document: 'docs/a', tags: ['starting'] } },
+        { id: 'B', data: { label: 'B', document: 'docs/b', tags: ['starting'] } },
+        { id: 'C', data: { label: 'C', document: 'docs/c' } },
+        { id: 'D', data: { label: 'D', document: 'docs/d' } },
       ],
       hyperedges: [
-        { id: 'h-main', weight: 1.5, tails: ['A', 'B'], head: 'C', data: { document: 'docs/h-main', format: 'markdown' } },
-        { id: 'h-alt', weight: 3, tails: ['A', 'B'], head: 'C', data: { document: 'docs/h-alt', format: 'markdown' } },
+        { id: 'h-main', weight: 1.5, tails: ['A', 'B'], head: 'C', data: { document: 'docs/h-main' } },
+        { id: 'h-alt', weight: 3, tails: ['A', 'B'], head: 'C', data: { document: 'docs/h-alt' } },
       ],
     },
   }, null, 2)}\n`);
@@ -69,7 +69,7 @@ test('validator accepts a complete workspace and reports authoring errors', asyn
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
   const valid = run(validator, ['--json', root]);
-  assert.equal(valid.status, 0, valid.stderr);
+  assert.equal(valid.status, 0, valid.stdout + valid.stderr);
   assert.equal(JSON.parse(valid.stdout).valid, true);
 
   const manifestPath = path.join(root, '.derivon/workspace.json');
@@ -153,30 +153,6 @@ test('generated tool bundles start without repository dependencies', async (t) =
   }
 });
 
-test('renderer audits HTML-only publications without rewriting them', async (t) => {
-  const root = await fixture();
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const manifestPath = path.join(root, '.derivon/workspace.json');
-  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  manifest.graph.points[0].data.format = 'html';
-  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  await writeImage(path.join(root, 'docs/a/circuit.png'));
-  const publication = '<!doctype html><html><body><img src="./circuit.png" alt="Closed circuit"></body></html>\n';
-  await writeFile(path.join(root, 'docs/a/index.html'), publication);
-
-  const accepted = run(renderer, ['--write', root, 'A']);
-  assert.equal(accepted.status, 0, accepted.stderr);
-  assert.match(accepted.stdout, /Media \[A\] 1 local image/);
-  assert.equal(await readFile(path.join(root, 'docs/a/index.html'), 'utf8'), publication);
-
-  const remote = '<!doctype html><html><body><img src="https://example.com/circuit.png" alt="Closed circuit"></body></html>\n';
-  await writeFile(path.join(root, 'docs/a/index.html'), remote);
-  const rejected = run(renderer, ['--write', root, 'A']);
-  assert.equal(rejected.status, 1);
-  assert.match(rejected.stderr, /docs\/a\/index\.html:1/);
-  assert.equal(await readFile(path.join(root, 'docs/a/index.html'), 'utf8'), remote);
-});
-
 test('exporter follows executable order, preserves assets, and protects output', async (t) => {
   const root = await fixture();
   const output = path.join(root, 'textbook');
@@ -243,13 +219,13 @@ test('exporter requires explicit opt-in for a budget-limited route', async (t) =
   const manifestPath = path.join(root, '.derivon/workspace.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   const graph = {
-    points: ['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((id) => ({ id, data: { label: id, document: `docs/${id.toLowerCase()}`, format: 'markdown' } })),
+    points: ['A', 'B', 'C', 'D', 'E', 'F', 'G'].map((id) => ({ id, data: { label: id, document: `docs/${id.toLowerCase()}` } })),
     hyperedges: [
       ['h0', 1, ['D'], 'C'], ['h1', 4, ['B', 'E'], 'D'], ['h2', 3, ['A', 'E'], 'G'],
       ['h3', 5, ['D'], 'E'], ['h4', 3, ['F'], 'E'], ['h5', 1, ['D'], 'F'],
       ['h6', 5, ['A'], 'D'], ['h7', 1, ['C', 'B'], 'G'], ['h8', 3, ['A'], 'B'],
       ['h9', 2, ['B', 'D'], 'G'], ['h10', 5, ['F'], 'D'], ['h11', 2, ['G'], 'E'],
-    ].map(([id, weight, tails, head]) => ({ id, weight, tails, head, data: { document: `docs/${id}`, format: 'markdown' } })),
+    ].map(([id, weight, tails, head]) => ({ id, weight, tails, head, data: { document: `docs/${id}` } })),
   };
   manifest.graph = graph;
   for (const object of [...graph.points, ...graph.hyperedges]) {
@@ -409,5 +385,5 @@ mv "$manifest_tmp" "$manifest"
   assert.equal(result.status, 0, result.stderr);
   const manifest = JSON.parse(await readFile(path.join(root, '.derivon/workspace.json'), 'utf8'));
   assert.equal(manifest.graph.hyperedges[0].weight, 2.5);
-  assert.deepEqual(manifest.tags, [{ id: 'starting', label: 'Starting points', description: 'Concepts with no premises.' }]);
+  assert.deepEqual(manifest.tags, [{ id: 'starting', label: 'Starting points' }]);
 });

@@ -23,12 +23,8 @@ async function fixture() {
   for (const point of points) {
     const directory = path.join(root, point.data.document);
     await mkdir(directory, { recursive: true });
-    if (point.data.format === 'markdown') {
-      await writeFile(path.join(directory, 'document.md'), `# ${point.data.label}\n\nOwn document.\n`);
-      await writeFile(path.join(directory, 'index.html'), '<!doctype html><html><body>stale</body></html>\n');
-    } else {
-      await writeFile(path.join(directory, 'index.html'), '<!doctype html><html><body><h1>HTML Topic</h1><p><strong>Agent</strong> Loop and <code>Tool Layer</code>.</p></body></html>\n');
-    }
+    await writeFile(path.join(directory, 'document.md'), `# ${point.data.label}\n\nOwn document.\n`);
+    await writeFile(path.join(directory, 'index.html'), '<!doctype html><html><body>stale</body></html>\n');
   }
   await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify({
     schema: 'derivon.workspace/v1',
@@ -88,7 +84,7 @@ test('crosslink detects encountered duplicate labels but ignores unused duplicat
   t.after(() => rm(root, { recursive: true, force: true }));
   const manifestPath = path.join(root, '.derivon/workspace.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  manifest.graph.points.push({ id: 'loop-2', data: { label: 'Agent Loop', document: 'docs/loop-2', format: 'markdown' } });
+  manifest.graph.points.push({ id: 'loop-2', data: { label: 'Agent Loop', document: 'docs/loop-2' } });
   await mkdir(path.join(root, 'docs/loop-2'));
   await writeFile(path.join(root, 'docs/loop-2/document.md'), '# Other\n');
   await writeFile(path.join(root, 'docs/loop-2/index.html'), '<html><body>Other</body></html>\n');
@@ -99,16 +95,6 @@ test('crosslink detects encountered duplicate labels but ignores unused duplicat
   const ambiguous = run(['--write', root, 'topic']);
   assert.equal(ambiguous.status, 1);
   assert.match(ambiguous.stderr, /ambiguous-label/);
-});
-
-test('crosslink updates eligible HTML-only body text without touching excluded nodes', async (t) => {
-  const root = await fixture();
-  t.after(() => rm(root, { recursive: true, force: true }));
-  const result = run(['--write', root, 'html']);
-  assert.equal(result.status, 0, result.stderr);
-  const html = await readFile(path.join(root, 'docs/concept-html/index.html'), 'utf8');
-  assert.match(html, /<p><a href="\.\.\/concept-agent-loop\/index\.html"><strong>Agent<\/strong> Loop<\/a> and <code>Tool Layer<\/code>/);
-  assert.match(html, /<h1>HTML Topic<\/h1>/);
 });
 
 test('crosslink rejects a document source symlink outside the workspace', async (t) => {
@@ -131,7 +117,7 @@ test('crosslink supports candidate manifests and requires explicit scope', async
   t.after(() => rm(root, { recursive: true, force: true }));
   assert.equal(run([root]).status, 2);
   const manifest = JSON.parse(await readFile(path.join(root, '.derivon/workspace.json'), 'utf8'));
-  manifest.graph.points.push({ id: 'new', data: { label: 'New Concept', document: 'docs/new', format: 'markdown' } });
+  manifest.graph.points.push({ id: 'new', data: { label: 'New Concept', document: 'docs/new' } });
   await mkdir(path.join(root, 'docs/new'));
   await writeFile(path.join(root, 'docs/new/document.md'), '# New Concept\n');
   await writeFile(path.join(root, 'docs/new/index.html'), '<html><body>New</body></html>\n');

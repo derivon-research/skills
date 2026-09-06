@@ -29333,19 +29333,17 @@ var publications = [];
 var mediaIssues = [];
 for (const object of selected) {
   const directory = await safeWorkspacePath(workspaceRoot, object.data.document);
-  const htmlOnly = object.data?.format === "html";
-  const sourceName = htmlOnly ? "index.html" : "document.md";
-  const sourcePath = path3.join(directory, sourceName);
+  const sourcePath = path3.join(directory, "document.md");
   const outputPath = path3.join(directory, "index.html");
   const source = await readFile2(sourcePath, "utf8");
   try {
     const media = await auditDocumentMedia({
       markdown: source,
       objectId: object.id,
-      sourcePath: `${object.data.document}/${sourceName}`,
+      sourcePath: `${object.data.document}/document.md`,
       objectDirectory: directory
     });
-    publications.push({ object, markdown: source, outputPath, media, htmlOnly });
+    publications.push({ object, markdown: source, outputPath, media });
   } catch (error) {
     if (!(error instanceof MediaPreflightError)) throw error;
     mediaIssues.push(...error.issues);
@@ -29356,9 +29354,9 @@ if (mediaIssues.length) {
   process.exitCode = 1;
 } else {
   let drift = 0;
-  for (const { object, markdown, outputPath, media, htmlOnly } of publications) {
-    if (!htmlOnly) {
-      const title = object.kind === "concept" ? object.data.label : `Derivation ${object.id}`;
+  for (const { object, markdown, outputPath, media } of publications) {
+    {
+      const title = object.data.label || (object.kind === "concept" ? object.id : `Derivation ${object.id}`);
       const expected = renderDocument(markdown, title || object.id);
       let current = null;
       try {

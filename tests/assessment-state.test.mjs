@@ -21,11 +21,11 @@ async function fixture() {
     document: { title: 'Teaching fixture', description: '' },
     graph: {
       points: [
-        { id: 'A', data: { label: 'A', document: 'docs/a', format: 'markdown' } },
-        { id: 'B', data: { label: 'B', document: 'docs/b', format: 'markdown' } },
+        { id: 'A', data: { label: 'A', document: 'docs/a' } },
+        { id: 'B', data: { label: 'B', document: 'docs/b' } },
       ],
       hyperedges: [
-        { id: 'h-ab', weight: 1.5, tails: ['A'], head: 'B', data: { document: 'docs/h-ab', format: 'markdown' } },
+        { id: 'h-ab', weight: 1.5, tails: ['A'], head: 'B', data: { document: 'docs/h-ab' } },
       ],
     },
   }, null, 2)}\n`);

@@ -153,11 +153,17 @@ When a structural change also changes an owning Markdown explanation, edit its
 `document.md` first and prefix the transaction with `RENDER_IDS='ID ...'` so the
 candidate publication is synchronized before commit.
 
-Mindmap point data must contain exactly `label`, `document`, and `format`;
-hyperedge data must contain exactly `document` and `format`. Consequently,
-`point data remove` and `hyperedge data remove` are valid core CLI commands but
-cannot produce a valid v0.3 Mindmap workspace. The full validator intentionally
-prevents committing such a candidate.
+Mindmap point data requires `label` and `document`, and may carry `description` and
+`tags`; hyperedge data requires `document` and may carry `label` and `description`.
+Documents are Markdown only: every object owns a `document.md` and the `index.html`
+rendered from it. Consequently, `point data remove` and `hyperedge data remove` are valid
+core CLI commands but cannot produce a valid Mindmap workspace. The full validator
+intentionally prevents committing such a candidate.
+
+Object ids are generated, never chosen: `scripts/new-object-id.mjs` mints one in the same
+shape the application does — `c-` or `h-` plus six lowercase characters from an alphabet
+without `0 1 i l o u`, random so a deleted id is never handed out again. Ids need only be
+unique inside one graph.
 
 Before rename, remove, cascade, head/tail rewiring, or document-path replacement,
 inspect incident edges, replacements, and owned documents; report impact and get
@@ -168,14 +174,15 @@ confirmation. Removing a graph object never deletes its document directory.
 Create the required files before committing the graph object:
 
 ```sh
-ID=limit
-DOC=docs/concept-limit
+ID=$(node "$SKILL_DIR/scripts/new-object-id.mjs" --manifest "$MANIFEST" --kind concept)
+DOC="docs/concept-${ID#c-}"
 mkdir -p "$ROOT/$DOC"
 printf '%s\n' '# Limit' '' 'Source-grounded definition, scope, and example.' > "$ROOT/$DOC/document.md"
 printf '%s\n' '<!doctype html><html><body>pending render</body></html>' > "$ROOT/$DOC/index.html"
 
 POINT_DATA=$(jq -cn --arg label 'Limit' --arg document "$DOC" \
-  '{label:$label,document:$document,format:"markdown"}')
+  --arg description 'The value a function approaches.' \
+  '{label:$label,description:$description,document:$document}')
 RENDER_IDS=$ID commit_graph point add "$ID" --data "$POINT_DATA"
 ```
 
@@ -190,14 +197,15 @@ Read every tail, the proposed derivation source, and the head together. Every ta
 must contribute; distinct arguments become parallel hyperedges.
 
 ```sh
-ID=limit-sum
-DOC=docs/derivation-limit-sum
+ID=$(node "$SKILL_DIR/scripts/new-object-id.mjs" --manifest "$MANIFEST" --kind derivation)
+DOC="docs/derivation-${ID#h-}"
 mkdir -p "$ROOT/$DOC"
 printf '%s\n' '# Sum rule for limits' '' \
   'Explain how every premise contributes and what establishes the head.' > "$ROOT/$DOC/document.md"
 printf '%s\n' '<!doctype html><html><body>pending render</body></html>' > "$ROOT/$DOC/index.html"
 
-EDGE_DATA=$(jq -cn --arg document "$DOC" '{document:$document,format:"markdown"}')
+EDGE_DATA=$(jq -cn --arg document "$DOC" --arg label 'Sum rule for limits' \
+  '{label:$label,document:$document}')
 RENDER_IDS=$ID commit_graph hyperedge add "$ID" \
   --tail limit-f --tail limit-g --head limit-sum-result --weight 2.0 \
   --data "$EDGE_DATA"
@@ -221,8 +229,8 @@ OPS=$(mktemp "$ROOT/.derivon/operations.XXXXXX")
 trap 'rm -f "$OPS"' 0 1 2 15
 cat > "$OPS" <<'JSON'
 [
-  {"op":"point.add","id":"B","data":{"label":"B","document":"docs/b","format":"markdown"}},
-  {"op":"hyperedge.add","id":"h-a-b","tails":["A"],"head":"B","weight":1.5,"data":{"document":"docs/h-a-b","format":"markdown"}}
+  {"op":"point.add","id":"B","data":{"label":"B","document":"docs/b"}},
+  {"op":"hyperedge.add","id":"h-a-b","tails":["A"],"head":"B","weight":1.5,"data":{"document":"docs/h-a-b"}}
 ]
 JSON
 RENDER_IDS='B h-a-b' commit_graph apply --operations "$OPS"
