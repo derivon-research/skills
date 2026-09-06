@@ -42,12 +42,13 @@ async function fixture() {
   await writeImage(path.join(root, 'docs/h-main/diagram.png'));
   await mkdir(path.join(root, '.derivon'), { recursive: true });
   await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify({
-    schema: 'derivon.authoring/v0.3.0',
+    schema: 'derivon.workspace/v1',
     document: { title: 'Fixture', description: 'Route export fixture' },
+    tags: [{ id: 'starting', label: 'Starting points', description: 'Concepts with no premises.' }],
     graph: {
       points: [
-        { id: 'A', data: { label: 'A', document: 'docs/a', format: 'markdown' } },
-        { id: 'B', data: { label: 'B', document: 'docs/b', format: 'markdown' } },
+        { id: 'A', data: { label: 'A', document: 'docs/a', format: 'markdown', tags: ['starting'] } },
+        { id: 'B', data: { label: 'B', document: 'docs/b', format: 'markdown', tags: ['starting'] } },
         { id: 'C', data: { label: 'C', document: 'docs/c', format: 'markdown' } },
         { id: 'D', data: { label: 'D', document: 'docs/d', format: 'markdown' } },
       ],
@@ -56,7 +57,6 @@ async function fixture() {
         { id: 'h-alt', weight: 3, tails: ['A', 'B'], head: 'C', data: { document: 'docs/h-alt', format: 'markdown' } },
       ],
     },
-    view: { replacements: [{ points: ['A', 'B'], replaceWith: 'C', show: 'points' }] },
   }, null, 2)}\n`);
   return root;
 }
@@ -75,14 +75,31 @@ test('validator accepts a complete workspace and reports authoring errors', asyn
   const manifestPath = path.join(root, '.derivon/workspace.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   manifest.graph.points[1].data.document = 'docs/a';
-  manifest.view.replacements.push({ points: ['C'], replaceWith: 'A', show: 'points' });
+  manifest.tags.push({ id: 'starting', label: 'Duplicate' });
+  manifest.graph.points[2].data.tags = ['ok', ''];
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   const invalid = run(validator, ['--json', root]);
   assert.equal(invalid.status, 1);
   const result = JSON.parse(invalid.stdout);
   assert.equal(result.valid, false);
   assert.ok(result.issues.some((entry) => entry.message.includes('also owned')));
-  assert.ok(result.issues.some((entry) => entry.message.includes('cycle')));
+  assert.ok(result.issues.some((entry) => entry.message.includes('duplicate tag ID starting')));
+  assert.ok(result.issues.some((entry) => entry.path === '/graph/points/2/data/tags/1'));
+});
+
+test('validator refuses a schema string it does not know and a manifest carrying view', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const manifestPath = path.join(root, '.derivon/workspace.json');
+  const v1 = JSON.parse(await readFile(manifestPath, 'utf8'));
+
+  await writeFile(manifestPath, `${JSON.stringify({ ...v1, schema: 'derivon.authoring/v0.3.0' }, null, 2)}\n`);
+  const old = JSON.parse(run(validator, ['--json', root]).stdout);
+  assert.ok(old.issues.some((entry) => entry.path === '/schema'));
+
+  await writeFile(manifestPath, `${JSON.stringify({ ...v1, view: { replacements: [] } }, null, 2)}\n`);
+  const carried = JSON.parse(run(validator, ['--json', root]).stdout);
+  assert.ok(carried.issues.some((entry) => entry.path === '/view' && entry.message === 'unknown field'));
 });
 
 test('workspace tools reject document symlinks outside the workspace', async (t) => {
@@ -235,7 +252,6 @@ test('exporter requires explicit opt-in for a budget-limited route', async (t) =
     ].map(([id, weight, tails, head]) => ({ id, weight, tails, head, data: { document: `docs/${id}`, format: 'markdown' } })),
   };
   manifest.graph = graph;
-  manifest.view.replacements = [];
   for (const object of [...graph.points, ...graph.hyperedges]) {
     const directory = path.join(root, object.data.document);
     await mkdir(directory, { recursive: true });
@@ -393,5 +409,5 @@ mv "$manifest_tmp" "$manifest"
   assert.equal(result.status, 0, result.stderr);
   const manifest = JSON.parse(await readFile(path.join(root, '.derivon/workspace.json'), 'utf8'));
   assert.equal(manifest.graph.hyperedges[0].weight, 2.5);
-  assert.equal(manifest.view.replacements[0].replaceWith, 'C');
+  assert.deepEqual(manifest.tags, [{ id: 'starting', label: 'Starting points', description: 'Concepts with no premises.' }]);
 });

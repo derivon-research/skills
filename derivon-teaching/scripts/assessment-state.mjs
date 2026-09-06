@@ -84,8 +84,8 @@ async function loadWorkspace(input, createTeachingDirectory) {
     throw new Error('Expected a real .derivon/workspace.json file');
   }
   const manifest = parseJson(await readFile(manifestPath, 'utf8'), manifestPath);
-  if (manifest?.schema !== 'derivon.authoring/v0.3.0') {
-    throw new Error('Teaching state requires derivon.authoring/v0.3.0');
+  if (manifest?.schema !== 'derivon.workspace/v1') {
+    throw new Error('Teaching state requires derivon.workspace/v1');
   }
   if (!Array.isArray(manifest?.graph?.points) || !Array.isArray(manifest?.graph?.hyperedges)) {
     throw new Error('Workspace manifest has no valid graph arrays');

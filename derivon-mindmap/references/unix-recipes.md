@@ -39,10 +39,9 @@ mkdir -p "$ROOT/.derivon"
 NEXT=$(mktemp "$ROOT/.derivon/workspace.XXXXXX")
 trap 'rm -f "$NEXT"' 0 1 2 15
 jq -n --arg title 'Untitled Mindmap' --arg description '' '{
-  schema: "derivon.authoring/v0.3.0",
+  schema: "derivon.workspace/v1",
   document: {title: $title, description: $description},
-  graph: {points: [], hyperedges: []},
-  view: {replacements: []}
+  graph: {points: [], hyperedges: []}
 }' > "$NEXT"
 node "$SKILL_DIR/scripts/validate-workspace.mjs" --manifest "$NEXT" "$ROOT"
 mv "$NEXT" "$MANIFEST"

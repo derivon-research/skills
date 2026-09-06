@@ -26,18 +26,19 @@ try {
   finish([{ path: '.derivon/workspace.json', message: error.message }]);
 }
 
-checkObject(manifest, '', ['schema', 'document', 'graph', 'view']);
-if (manifest.schema !== 'derivon.authoring/v0.3.0') issue('/schema', 'expected derivon.authoring/v0.3.0');
+// `derivon.workspace/v1` is the only workspace protocol; an unrecognized schema string is
+// a broken workspace.
+checkObject(manifest, '', ['schema', 'document', 'graph', 'tags'], ['schema', 'document', 'graph']);
+if (manifest.schema !== 'derivon.workspace/v1') issue('/schema', 'expected derivon.workspace/v1');
 checkObject(manifest.document, '/document', ['title', 'description']);
 if (typeof manifest.document?.title !== 'string') issue('/document/title', 'expected string');
 if (typeof manifest.document?.description !== 'string') issue('/document/description', 'expected string');
 checkObject(manifest.graph, '/graph', ['points', 'hyperedges']);
-checkObject(manifest.view, '/view', ['replacements']);
 points = Array.isArray(manifest.graph?.points) ? manifest.graph.points : [];
 hyperedges = Array.isArray(manifest.graph?.hyperedges) ? manifest.graph.hyperedges : [];
 if (!Array.isArray(manifest.graph?.points)) issue('/graph/points', 'expected array');
 if (!Array.isArray(manifest.graph?.hyperedges)) issue('/graph/hyperedges', 'expected array');
-if (!Array.isArray(manifest.view?.replacements)) issue('/view/replacements', 'expected array');
+checkTags(manifest.tags);
 
 const cli = spawnSync('derivon', ['validate'], {
   input: JSON.stringify({ points, hyperedges }),
@@ -64,46 +65,50 @@ for (const [index, edge] of hyperedges.entries()) {
   await checkDocument(edge, 'derivation', location);
 }
 
-const targetIds = new Set();
-const ownerByMember = new Map();
-for (const [index, replacement] of (manifest.view?.replacements ?? []).entries()) {
-  const location = `/view/replacements/${index}`;
-  checkObject(replacement, location, ['points', 'replaceWith', 'show']);
-  if (!Array.isArray(replacement?.points) || replacement.points.length === 0) issue(`${location}/points`, 'expected a non-empty point ID array');
-  else {
-    const seen = new Set();
-    for (const member of replacement.points) {
-      if (!pointIds.has(member)) issue(`${location}/points`, `unknown point ${String(member)}`);
-      if (seen.has(member)) issue(`${location}/points`, `duplicate member ${String(member)}`);
-      seen.add(member);
-      if (member === replacement.replaceWith) issue(`${location}/points`, 'replacement target cannot be a member');
-      if (ownerByMember.has(member)) issue(`${location}/points`, `member already belongs to replacement ${ownerByMember.get(member)}`);
-      else ownerByMember.set(member, replacement.replaceWith);
-    }
-  }
-  if (!pointIds.has(replacement?.replaceWith)) issue(`${location}/replaceWith`, 'expected an existing point ID');
-  else if (targetIds.has(replacement.replaceWith)) issue(`${location}/replaceWith`, 'target is used by another replacement');
-  else targetIds.add(replacement.replaceWith);
-  if (!['points', 'replacement'].includes(replacement?.show)) issue(`${location}/show`, 'expected points or replacement');
-}
-for (const target of targetIds) {
-  let cursor = target;
-  const visited = new Set();
-  while (ownerByMember.has(cursor)) {
-    if (visited.has(cursor)) {
-      issue('/view/replacements', `replacement cycle contains ${cursor}`);
-      break;
-    }
-    visited.add(cursor);
-    cursor = ownerByMember.get(cursor);
-  }
-}
 finish(issues);
+
+/** Workspace-level tag declarations. */
+function checkTags(tags) {
+  if (tags === undefined) return;
+  if (!Array.isArray(tags)) {
+    issue('/tags', 'expected array');
+    return;
+  }
+  const declared = new Set();
+  for (const [index, tag] of tags.entries()) {
+    const location = `/tags/${index}`;
+    checkObject(tag, location, ['id', 'label', 'description'], ['id', 'label']);
+    if (typeof tag?.id !== 'string' || !tag.id.trim()) issue(`${location}/id`, 'expected non-empty string');
+    else if (declared.has(tag.id)) issue(`${location}/id`, `duplicate tag ID ${tag.id}`);
+    else declared.add(tag.id);
+    if (typeof tag?.label !== 'string' || !tag.label.trim()) issue(`${location}/label`, 'expected non-empty string');
+    if (tag?.description !== undefined && typeof tag.description !== 'string') {
+      issue(`${location}/description`, 'expected string');
+    }
+  }
+}
+
+/** Tags belong to concepts. */
+function checkConceptTags(tags, location) {
+  if (tags === undefined) return;
+  if (!Array.isArray(tags)) {
+    issue(location, 'expected array of tag IDs');
+    return;
+  }
+  const seen = new Set();
+  for (const [index, tag] of tags.entries()) {
+    if (typeof tag !== 'string' || !tag.trim()) issue(`${location}/${index}`, 'expected non-empty string');
+    else if (seen.has(tag)) issue(`${location}/${index}`, `duplicate tag ${tag}`);
+    else seen.add(tag);
+  }
+}
 
 async function checkDocument(object, kind, location) {
   const data = object?.data;
-  const fields = kind === 'concept' ? ['label', 'document', 'format'] : ['document', 'format'];
-  checkObject(data, `${location}/data`, fields, fields);
+  const required = kind === 'concept' ? ['label', 'document', 'format'] : ['document', 'format'];
+  const fields = kind === 'concept' ? [...required, 'tags'] : required;
+  checkObject(data, `${location}/data`, fields, required);
+  if (kind === 'concept') checkConceptTags(data?.tags, `${location}/data/tags`);
   if (kind === 'concept' && typeof data?.label !== 'string') issue(`${location}/data/label`, 'expected string');
   if (!['markdown', 'html'].includes(data?.format)) issue(`${location}/data/format`, 'expected markdown or html');
   if (!safeRelativeDirectory(data?.document)) {

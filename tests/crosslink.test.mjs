@@ -31,10 +31,9 @@ async function fixture() {
     }
   }
   await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify({
-    schema: 'derivon.authoring/v0.3.0',
+    schema: 'derivon.workspace/v1',
     document: { title: 'Crosslinks', description: 'Fixture' },
     graph: { points, hyperedges: [] },
-    view: { replacements: [] },
   }, null, 2)}\n`);
   return root;
 }
