@@ -24,7 +24,6 @@ async function fixture() {
     const directory = path.join(root, point.data.document);
     await mkdir(directory, { recursive: true });
     await writeFile(path.join(directory, 'document.md'), `# ${point.data.label}\n\nOwn document.\n`);
-    await writeFile(path.join(directory, 'index.html'), '<!doctype html><html><body>stale</body></html>\n');
   }
   await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify({
     schema: 'derivon.workspace/v1',
@@ -55,9 +54,9 @@ test('crosslink check and write preserve Markdown while linking first exact pros
   const written = run(['--write', root, 'topic']);
   assert.equal(written.status, 0, written.stderr);
   const output = await readFile(sourcePath, 'utf8');
-  assert.match(output, /\[\*\*Agent\*\* Loop\]\(\.\.\/concept-agent-loop\/index\.html\)/);
-  assert.match(output, /\[Tool Layer\]\(\.\.\/nested\/concept%20tool\/index\.html\)/);
-  assert.match(output, /\[工具调用\]\(\.\.\/concept-cn\/index\.html\)/);
+  assert.match(output, /\[\*\*Agent\*\* Loop\]\(\.\.\/concept-agent-loop\/document\.md\)/);
+  assert.match(output, /\[Tool Layer\]\(\.\.\/nested\/concept%20tool\/document\.md\)/);
+  assert.match(output, /\[工具调用\]\(\.\.\/concept-cn\/document\.md\)/);
   assert.match(output, /Skills is plural; \[Skill\]/);
   assert.match(output, /- Agent Loop repeats/);
   assert.match(output, /`Agent Loop` and \$Tool Layer\$/);
@@ -87,7 +86,6 @@ test('crosslink detects encountered duplicate labels but ignores unused duplicat
   manifest.graph.points.push({ id: 'loop-2', data: { label: 'Agent Loop', document: 'docs/loop-2' } });
   await mkdir(path.join(root, 'docs/loop-2'));
   await writeFile(path.join(root, 'docs/loop-2/document.md'), '# Other\n');
-  await writeFile(path.join(root, 'docs/loop-2/index.html'), '<html><body>Other</body></html>\n');
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
   await writeFile(path.join(root, 'docs/concept-topic/document.md'), '# Topic\n\nTool Layer only.\n');
   assert.equal(run(['--write', root, 'topic']).status, 0);
@@ -120,11 +118,10 @@ test('crosslink supports candidate manifests and requires explicit scope', async
   manifest.graph.points.push({ id: 'new', data: { label: 'New Concept', document: 'docs/new' } });
   await mkdir(path.join(root, 'docs/new'));
   await writeFile(path.join(root, 'docs/new/document.md'), '# New Concept\n');
-  await writeFile(path.join(root, 'docs/new/index.html'), '<html><body>New</body></html>\n');
   const candidate = path.join(root, '.derivon/candidate.json');
   await writeFile(candidate, `${JSON.stringify(manifest, null, 2)}\n`);
   await writeFile(path.join(root, 'docs/concept-topic/document.md'), '# Topic\n\nNew Concept appears.\n');
   const result = run(['--write', '--manifest', candidate, root, 'topic']);
   assert.equal(result.status, 0, result.stderr);
-  assert.match(await readFile(path.join(root, 'docs/concept-topic/document.md'), 'utf8'), /\[New Concept\]\(\.\.\/new\/index\.html\)/);
+  assert.match(await readFile(path.join(root, 'docs/concept-topic/document.md'), 'utf8'), /\[New Concept\]\(\.\.\/new\/document\.md\)/);
 });

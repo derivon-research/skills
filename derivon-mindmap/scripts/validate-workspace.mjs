@@ -129,7 +129,6 @@ async function checkDocument(object, kind, location) {
     issue(`${location}/data/document`, `missing directory ${data.document}`);
     return;
   }
-  await requireFile(`${data.document}/index.html`, location);
   await requireFile(`${data.document}/document.md`, location);
 }
 

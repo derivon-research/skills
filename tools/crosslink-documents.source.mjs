@@ -38,7 +38,7 @@ for (const point of points) {
   pointGroups.set(point.data.label, group);
 }
 const labels = [...pointGroups.keys()].filter(Boolean).sort((left, right) => right.length - left.length || left.localeCompare(right));
-const targetByPublication = new Map(objects.map((object) => [normalizeWorkspacePath(`${object.data.document}/index.html`), object]));
+const targetByDocument = new Map(objects.map((object) => [normalizeWorkspacePath(`${object.data.document}/document.md`), object]));
 const reports = [];
 const blockers = [];
 
@@ -67,7 +67,7 @@ for (const object of selected) {
     analysis,
     labels,
     pointGroups,
-    targetByPublication,
+    targetByDocument,
   });
   reports.push({ ...result, filename, content: source });
   blockers.push(...result.issues);
@@ -92,7 +92,7 @@ if (blockers.length) {
       analysis,
       labels,
       pointGroups,
-      targetByPublication,
+      targetByDocument,
     });
     if (verification.issues.length || verification.insertions.length) {
       throw new Error(`Crosslink verification failed for ${report.source}`);
@@ -267,13 +267,13 @@ function htmlBlock(source, node) {
   return { groups };
 }
 
-function resolveInsertions({ source, object, relativeSource, analysis, labels, pointGroups, targetByPublication }) {
+function resolveInsertions({ source, object, relativeSource, analysis, labels, pointGroups, targetByDocument }) {
   const issues = [];
   const candidates = [];
   const validLinks = new Map();
   const conflicts = [];
   for (const link of analysis.links) {
-    const target = resolveObjectHref(`${object.data.document}/${'document.md'}`, link.href, targetByPublication);
+    const target = resolveObjectHref(`${object.data.document}/${'document.md'}`, link.href, targetByDocument);
     if (target?.kind === 'concept') {
       const existing = validLinks.get(target.id);
       if (existing === undefined || link.start < existing) validLinks.set(target.id, link.start);
@@ -388,19 +388,19 @@ function applyPatches(source, insertions) {
 
 function relativeObjectHref(sourceDocument, targetDirectory) {
   const sourceDirectory = path.posix.dirname(normalizeWorkspacePath(sourceDocument));
-  const target = `${normalizeWorkspacePath(targetDirectory)}/index.html`;
+  const target = `${normalizeWorkspacePath(targetDirectory)}/document.md`;
   const relative = path.posix.relative(sourceDirectory, target);
   return relative.split('/').map((segment) => segment === '..' || segment === '.' ? segment : encodeURIComponent(segment)).join('/');
 }
 
-function resolveObjectHref(sourceDocument, href, targetByPublication) {
+function resolveObjectHref(sourceDocument, href, targetByDocument) {
   const value = String(href ?? '').trim();
   if (!value || value.startsWith('#') || value.startsWith('/') || value.startsWith('\\') || /^[a-z][a-z\d+.-]*:/i.test(value) || value.startsWith('//')) return null;
   const pathOnly = value.split(/[?#]/, 1)[0];
   let decoded;
   try { decoded = pathOnly.split('/').map((segment) => decodeURIComponent(segment)).join('/'); } catch { return null; }
   const resolved = normalizeWorkspacePath(path.posix.join(path.posix.dirname(normalizeWorkspacePath(sourceDocument)), decoded));
-  return targetByPublication.get(resolved) ?? null;
+  return targetByDocument.get(resolved) ?? null;
 }
 
 function normalizeWorkspacePath(value) {

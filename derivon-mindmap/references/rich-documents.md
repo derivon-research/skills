@@ -9,12 +9,13 @@ concept or derivation role.
 Documents are Markdown only. Every object owns:
 
 ```text
-<document-directory>/document.md   # authoring source
-<document-directory>/index.html    # learner-visible publication
+<document-directory>/document.md   # the sole persisted document, including inline HTML
 ```
 
-The renderer converts GFM, KaTeX delimiters, Markdown images, and raw HTML into
-`index.html`. Think through what that HTML displays. An HTML comment such as
+The application renders GFM, KaTeX delimiters, Markdown images, and inline HTML
+on demand as the learner-visible publication. No standalone HTML is workspace
+content: do not generate, save, require, or reference it. Think through what the
+rendered document displays. An HTML comment such as
 `<!-- source-figure: page 147 -->` is invisible; it records metadata but does not
 insert a figure or satisfy a request.
 
@@ -25,20 +26,18 @@ Use the least powerful representation that carries the teaching meaning:
 2. Use a local static image through Markdown for a static figure or diagram.
 3. Use complete, visible raw HTML only for a concrete capability Markdown lacks.
 4. Add HTML/CSS/JavaScript interaction only under the gate below.
-5. Use HTML-only only when the source is inherently a complete page or cannot
-   reasonably retain Markdown source.
 
 ## Cross-reference documented concepts
 
 On the first meaningful prose mention of another canonical concept, link its
-visible label to that concept's `index.html` with a standard relative link, for
-example `[Agent Loop](../concept-agent-loop/index.html)`. Compute the href from
+visible label to that concept's `document.md` with a standard relative link, for
+example `[Agent Loop](../concept-agent-loop/document.md)`. Compute the href from
 manifest document paths; never guess it from an object ID. The link is reading
 navigation only, not a prerequisite, derivation, containment, replacement, or
 backlink.
 
 After writing a document batch, run `crosslink-documents.mjs --write` for the
-exact changed object IDs before rendering. It links unambiguous exact canonical
+exact changed object IDs before validation. It links unambiguous exact canonical
 labels in prose while leaving headings, code, math, existing links, raw HTML, and
 image alt text alone. Add semantic aliases manually. Report every source document
 changed by crosslinking. Whole-workspace `--all` use requires a check report and
@@ -73,11 +72,12 @@ local-path, and offline rules.
 
 ## Publication gate
 
-Run the bundled renderer after every Markdown edit. Renderer success is the
-publication gate: its media preflight checks local paths, supported image bytes
-and dimensions, declarative HTML/CSS dependencies, and common invisible figure
-placeholders before writing. It audits HTML-only `index.html` without rewriting
-it. Do not claim a media write succeeded when the renderer rejects it. Browser screenshots and manual responsive inspection are
+Run the bundled read-only renderer check after every Markdown edit. Renderer
+success is the publication gate: its media preflight checks local paths, supported
+image bytes and dimensions, declarative HTML/CSS dependencies, and common invisible
+figure placeholders. It neither reads nor writes standalone HTML. `--stdout` can
+render one selected Markdown document for a transient preview; `--write` is rejected.
+Do not claim a media edit is valid when the check rejects it. Browser screenshots and manual responsive inspection are
 not mandatory for this workflow; source fidelity and pedagogical correctness
 still require Agent judgment because structural checks cannot understand an
 image.

@@ -8,7 +8,7 @@ const scriptsDirectory = new URL('../derivon-mindmap/scripts/', import.meta.url)
 await mkdir(scriptsDirectory, { recursive: true });
 
 const renderer = new URL('render-documents.mjs', scriptsDirectory);
-await bundle(new URL('./render-documents.source.mjs', import.meta.url), renderer, [{
+const fontPlugins = [{
   name: 'inline-katex-fonts',
   setup(buildContext) {
     buildContext.onLoad({ filter: /katex\.min\.css$/ }, async ({ path: cssPath }) => {
@@ -23,7 +23,8 @@ await bundle(new URL('./render-documents.source.mjs', import.meta.url), renderer
       return { contents: `export default ${JSON.stringify(css)};`, loader: 'js' };
     });
   },
-}]);
+}];
+await bundle(new URL('./render-documents.source.mjs', import.meta.url), renderer, fontPlugins);
 
 await bundle(
   new URL('./crosslink-documents.source.mjs', import.meta.url),
@@ -32,6 +33,7 @@ await bundle(
 await bundle(
   new URL('./export-route-textbook.source.mjs', import.meta.url),
   new URL('export-route-textbook.mjs', scriptsDirectory),
+  fontPlugins,
 );
 
 async function bundle(entry, outfile, plugins = []) {
