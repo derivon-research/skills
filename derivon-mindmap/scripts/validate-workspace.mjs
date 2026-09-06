@@ -77,14 +77,11 @@ function checkTags(tags) {
   const declared = new Set();
   for (const [index, tag] of tags.entries()) {
     const location = `/tags/${index}`;
-    checkObject(tag, location, ['id', 'label', 'description'], ['id', 'label']);
+    checkObject(tag, location, ['id', 'label'], ['id', 'label']);
     if (typeof tag?.id !== 'string' || !tag.id.trim()) issue(`${location}/id`, 'expected non-empty string');
     else if (declared.has(tag.id)) issue(`${location}/id`, `duplicate tag ID ${tag.id}`);
     else declared.add(tag.id);
     if (typeof tag?.label !== 'string' || !tag.label.trim()) issue(`${location}/label`, 'expected non-empty string');
-    if (tag?.description !== undefined && typeof tag.description !== 'string') {
-      issue(`${location}/description`, 'expected string');
-    }
   }
 }
 
@@ -105,12 +102,16 @@ function checkConceptTags(tags, location) {
 
 async function checkDocument(object, kind, location) {
   const data = object?.data;
-  const required = kind === 'concept' ? ['label', 'document', 'format'] : ['document', 'format'];
-  const fields = kind === 'concept' ? [...required, 'tags'] : required;
+  const required = kind === 'concept' ? ['label', 'document'] : ['document'];
+  const fields = kind === 'concept' ? [...required, 'description', 'tags'] : [...required, 'label', 'description'];
   checkObject(data, `${location}/data`, fields, required);
   if (kind === 'concept') checkConceptTags(data?.tags, `${location}/data/tags`);
-  if (kind === 'concept' && typeof data?.label !== 'string') issue(`${location}/data/label`, 'expected string');
-  if (!['markdown', 'html'].includes(data?.format)) issue(`${location}/data/format`, 'expected markdown or html');
+  if (typeof data?.label !== 'string' && (kind === 'concept' || data?.label !== undefined)) {
+    issue(`${location}/data/label`, 'expected string');
+  }
+  if (data?.description !== undefined && typeof data.description !== 'string') {
+    issue(`${location}/data/description`, 'expected string');
+  }
   if (!safeRelativeDirectory(data?.document)) {
     issue(`${location}/data/document`, 'expected a safe workspace-relative directory');
     return;
@@ -128,8 +129,7 @@ async function checkDocument(object, kind, location) {
     issue(`${location}/data/document`, `missing directory ${data.document}`);
     return;
   }
-  await requireFile(`${data.document}/index.html`, location);
-  if (data.format === 'markdown') await requireFile(`${data.document}/document.md`, location);
+  await requireFile(`${data.document}/document.md`, location);
 }
 
 async function checkSymbolicLinks(directory, location) {

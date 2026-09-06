@@ -117,8 +117,8 @@ commit_graph() (
   if ! jq '.graph' "$MANIFEST" | derivon "$@" > "$GRAPH_TMP"; then exit 1; fi
   if ! derivon --input "$GRAPH_TMP" validate >/dev/null; then exit 1; fi
   if ! jq --slurpfile graph "$GRAPH_TMP" '.graph = $graph[0]' "$MANIFEST" > "$NEXT"; then exit 1; fi
-  for OBJECT_ID in ${RENDER_IDS:-}; do
-    if ! node "$SKILL_DIR/scripts/render-documents.mjs" --manifest "$NEXT" --write "$ROOT" "$OBJECT_ID"; then exit 1; fi
+  for OBJECT_ID in ${CHECK_IDS:-}; do
+    if ! node "$SKILL_DIR/scripts/render-documents.mjs" --manifest "$NEXT" "$ROOT" "$OBJECT_ID"; then exit 1; fi
   done
   if ! node "$SKILL_DIR/scripts/validate-workspace.mjs" --manifest "$NEXT" "$ROOT" >/dev/null; then exit 1; fi
   if ! mv "$NEXT" "$MANIFEST"; then exit 1; fi
@@ -137,8 +137,8 @@ Use the complete mutation surface through the helper:
 commit_graph point rename OLD NEW
 commit_graph point remove ID
 commit_graph point remove ID --cascade
-RENDER_IDS=ID commit_graph point data set ID /label --value '"New label"'
-RENDER_IDS=ID commit_graph point data set ID --value-file complete-point-data.json
+CHECK_IDS=ID commit_graph point data set ID /label --value '"New label"'
+CHECK_IDS=ID commit_graph point data set ID --value-file complete-point-data.json
 
 commit_graph hyperedge rename OLD NEW
 commit_graph hyperedge remove ID
@@ -146,18 +146,24 @@ commit_graph hyperedge set tails EDGE --tail A --tail B
 commit_graph hyperedge set tails EDGE
 commit_graph hyperedge set head EDGE C
 commit_graph hyperedge set weight EDGE 2.5
-RENDER_IDS=EDGE commit_graph hyperedge data set EDGE --value-file complete-edge-data.json
+CHECK_IDS=EDGE commit_graph hyperedge data set EDGE --value-file complete-edge-data.json
 ```
 
 When a structural change also changes an owning Markdown explanation, edit its
-`document.md` first and prefix the transaction with `RENDER_IDS='ID ...'` so the
-candidate publication is synchronized before commit.
+`document.md` first and prefix the transaction with `CHECK_IDS='ID ...'` so the
+candidate Markdown and media are checked without writing HTML before commit.
 
-Mindmap point data must contain exactly `label`, `document`, and `format`;
-hyperedge data must contain exactly `document` and `format`. Consequently,
-`point data remove` and `hyperedge data remove` are valid core CLI commands but
-cannot produce a valid v0.3 Mindmap workspace. The full validator intentionally
-prevents committing such a candidate.
+Mindmap point data requires `label` and `document`, and may carry `description` and
+`tags`; hyperedge data requires `document` and may carry `label` and `description`.
+Documents are Markdown only: every object owns only `document.md`, including any
+inline HTML. Standalone HTML is not workspace content. Consequently, `point data remove` and `hyperedge data remove` are valid
+core CLI commands but cannot produce a valid Mindmap workspace. The full validator
+intentionally prevents committing such a candidate.
+
+Object ids are generated, never chosen: `scripts/new-object-id.mjs` mints one in the same
+shape the application does — `c-` or `h-` plus six lowercase characters from an alphabet
+without `0 1 i l o u`, random so a deleted id is never handed out again. Ids need only be
+unique inside one graph.
 
 Before rename, remove, cascade, head/tail rewiring, or document-path replacement,
 inspect incident edges, replacements, and owned documents; report impact and get
@@ -168,15 +174,15 @@ confirmation. Removing a graph object never deletes its document directory.
 Create the required files before committing the graph object:
 
 ```sh
-ID=limit
-DOC=docs/concept-limit
+ID=$(node "$SKILL_DIR/scripts/new-object-id.mjs" --manifest "$MANIFEST" --kind concept)
+DOC="docs/concept-${ID#c-}"
 mkdir -p "$ROOT/$DOC"
 printf '%s\n' '# Limit' '' 'Source-grounded definition, scope, and example.' > "$ROOT/$DOC/document.md"
-printf '%s\n' '<!doctype html><html><body>pending render</body></html>' > "$ROOT/$DOC/index.html"
 
 POINT_DATA=$(jq -cn --arg label 'Limit' --arg document "$DOC" \
-  '{label:$label,document:$document,format:"markdown"}')
-RENDER_IDS=$ID commit_graph point add "$ID" --data "$POINT_DATA"
+  --arg description 'The value a function approaches.' \
+  '{label:$label,description:$description,document:$document}')
+CHECK_IDS=$ID commit_graph point add "$ID" --data "$POINT_DATA"
 ```
 
 Coordination in a proposed label requires the atomicity review from the Mindmap
@@ -190,15 +196,15 @@ Read every tail, the proposed derivation source, and the head together. Every ta
 must contribute; distinct arguments become parallel hyperedges.
 
 ```sh
-ID=limit-sum
-DOC=docs/derivation-limit-sum
+ID=$(node "$SKILL_DIR/scripts/new-object-id.mjs" --manifest "$MANIFEST" --kind derivation)
+DOC="docs/derivation-${ID#h-}"
 mkdir -p "$ROOT/$DOC"
 printf '%s\n' '# Sum rule for limits' '' \
   'Explain how every premise contributes and what establishes the head.' > "$ROOT/$DOC/document.md"
-printf '%s\n' '<!doctype html><html><body>pending render</body></html>' > "$ROOT/$DOC/index.html"
 
-EDGE_DATA=$(jq -cn --arg document "$DOC" '{document:$document,format:"markdown"}')
-RENDER_IDS=$ID commit_graph hyperedge add "$ID" \
+EDGE_DATA=$(jq -cn --arg document "$DOC" --arg label 'Sum rule for limits' \
+  '{label:$label,document:$document}')
+CHECK_IDS=$ID commit_graph hyperedge add "$ID" \
   --tail limit-f --tail limit-g --head limit-sum-result --weight 2.0 \
   --data "$EDGE_DATA"
 ```
@@ -213,24 +219,22 @@ intermediate core graph valid:
 ```sh
 mkdir -p "$ROOT/docs/b" "$ROOT/docs/h-a-b"
 printf '%s\n' '# B' '' 'Define B.' > "$ROOT/docs/b/document.md"
-printf '%s\n' '<!doctype html><html><body>pending render</body></html>' > "$ROOT/docs/b/index.html"
 printf '%s\n' '# A to B' '' 'Explain how A establishes B.' > "$ROOT/docs/h-a-b/document.md"
-printf '%s\n' '<!doctype html><html><body>pending render</body></html>' > "$ROOT/docs/h-a-b/index.html"
 
 OPS=$(mktemp "$ROOT/.derivon/operations.XXXXXX")
 trap 'rm -f "$OPS"' 0 1 2 15
 cat > "$OPS" <<'JSON'
 [
-  {"op":"point.add","id":"B","data":{"label":"B","document":"docs/b","format":"markdown"}},
-  {"op":"hyperedge.add","id":"h-a-b","tails":["A"],"head":"B","weight":1.5,"data":{"document":"docs/h-a-b","format":"markdown"}}
+  {"op":"point.add","id":"B","data":{"label":"B","document":"docs/b"}},
+  {"op":"hyperedge.add","id":"h-a-b","tails":["A"],"head":"B","weight":1.5,"data":{"document":"docs/h-a-b"}}
 ]
 JSON
-RENDER_IDS='B h-a-b' commit_graph apply --operations "$OPS"
+CHECK_IDS='B h-a-b' commit_graph apply --operations "$OPS"
 rm -f "$OPS"
 trap - 0 1 2 15
 ```
 
-`RENDER_IDS` makes the helper render changed Markdown against the candidate
+`CHECK_IDS` makes the helper check changed Markdown and media against the candidate
 manifest before replacement. Report every graph and document change after the
 transaction succeeds.
 
@@ -272,11 +276,11 @@ The validator rejects duplicate members, conflicting targets, and cycles. Report
 projection impact and obtain confirmation before removing or broadly changing a
 replacement.
 
-## Render, validate, and report
+## Check, validate, and report
 
 ```sh
 node "$SKILL_DIR/scripts/render-documents.mjs" "$ROOT"
-node "$SKILL_DIR/scripts/render-documents.mjs" --write "$ROOT" ID
+node "$SKILL_DIR/scripts/render-documents.mjs" "$ROOT" ID
 node "$SKILL_DIR/scripts/validate-workspace.mjs" "$ROOT"
 ```
 

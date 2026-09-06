@@ -1,6 +1,6 @@
 ---
 name: derivon-mindmap
-description: Operate a Derivon Mindmap workspace with derivon CLI and jq, apply the graph model to learning, maintain object documents and replacement views, validate and render publications, and export solved routes as previewable static textbooks. Use for .derivon/workspace.json or Mindmap project folders.
+description: Operate a Derivon Mindmap workspace with derivon CLI and jq, apply the graph model to learning, maintain object documents and replacement views, validate Markdown documents, and export solved routes as previewable static textbooks. Use for .derivon/workspace.json or Mindmap project folders.
 ---
 
 # Derivon Mindmap
@@ -35,8 +35,8 @@ its scripts.
 4. Read the full manifest and every affected object's source document.
 5. For a hyperedge, read all tail documents, its derivation document, and the head
    document together.
-6. Stage graph output and candidate manifest in `.derivon`, render candidate
-   Markdown publications, validate the candidate, then atomically replace the
+6. Stage graph output and candidate manifest in `.derivon`, check candidate
+   Markdown and media without writing HTML, validate the candidate, then atomically replace the
    manifest.
 
 Use direct `jq | derivon | jq` recipes for normal operations. Do not hide point,
@@ -57,12 +57,14 @@ rewiring require confirmation.
 
 ## Publish documents
 
-For Markdown objects, `document.md` is source and `index.html` is publication.
-Crosslink exact changed objects before rendering:
+Each object persists only `document.md`, including any inline HTML. The application
+renders it on demand while browsing. Never generate, save, require, or link to a
+standalone `index.html` in a workspace. Leave existing unrelated HTML files untouched.
+Crosslink exact changed objects before read-only Markdown/media validation:
 
 ```sh
 node "$SKILL_DIR/scripts/crosslink-documents.mjs" --write <workspace> <object-id>...
-node "$SKILL_DIR/scripts/render-documents.mjs" --write <workspace> <object-id>...
+node "$SKILL_DIR/scripts/render-documents.mjs" <workspace> <object-id>...
 node "$SKILL_DIR/scripts/validate-workspace.mjs" <workspace>
 ```
 
@@ -71,7 +73,7 @@ manifest replacement. Crosslinks are reading navigation only and never authorize
 graph edits. Check a broad migration with `--all --json`; do not run
 `--write --all` without an impact summary and confirmation.
 
-Preserve an existing object's format. New objects default to Markdown. Follow the
+Preserve Markdown and its inline HTML verbatim outside the requested edits. Follow the
 central object-document contract for every learner-visible source. Use native
 Markdown before static local images, raw HTML, or interaction; comments and
 placeholders never count as visible content. Rich content and interaction remain
@@ -88,7 +90,8 @@ node "$SKILL_DIR/scripts/export-route-textbook.mjs" <workspace> \
   --output <directory> --start <known-id> --target <goal-id> --serve
 ```
 
-The exporter follows solver `executableOrder`, copies complete object directories,
+The exporter renders Markdown into a separate textbook output, never into workspace
+object directories. It follows solver `executableOrder`, copies complete object directories,
 rewrites known workspace links, copies their bounded transitive reference closure,
 adds route/reference navigation, emits `route.json`, protects existing output, and
 refuses an unproven route unless `--allow-approximate` is explicit. Keep the loopback server

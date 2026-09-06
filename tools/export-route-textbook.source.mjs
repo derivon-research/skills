@@ -2,6 +2,8 @@ import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, sta
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { parse } from 'parse5';
+import { renderDocument } from './render-document.mjs';
+import { auditDocumentMedia } from './media-preflight.mjs';
 import path from 'node:path';
 import process from 'node:process';
 
@@ -58,7 +60,7 @@ if (!route.provenOptimal && !allowApproximate) fail('Route is not proven optimal
 const pointById = new Map(graph.points.map((point) => [point.id, { ...point, kind: 'concept' }]));
 const edgeById = new Map(graph.hyperedges.map((edge) => [edge.id, { ...edge, kind: 'derivation' }]));
 const objectById = new Map([...pointById, ...edgeById]);
-const objectByPublication = new Map([...objectById.values()].map((object) => [normalizeWorkspacePath(`${object.data.document}/index.html`), object]));
+const objectByPublication = new Map([...objectById.values()].map((object) => [normalizeWorkspacePath(`${object.data.document}/document.md`), object]));
 const sequence = [];
 const seenPoints = new Set();
 for (const id of route.startPointIds) addPoint(id, 'prerequisite');
@@ -82,9 +84,11 @@ for (let cursor = 0; cursor < queue.length; cursor += 1) {
   const object = queue[cursor];
   const source = await safeWorkspaceDirectory(workspaceRoot, object.data?.document);
   await rejectSymbolicLinks(source);
-  const sourceIndex = path.join(source, 'index.html');
-  let html;
-  try { html = await readFile(sourceIndex, 'utf8'); } catch { fail(`Missing document for ${object.kind} ${object.id}: ${path.relative(workspaceRoot, sourceIndex)}`); }
+  const sourceIndex = path.join(source, 'document.md');
+  let markdown;
+  try { markdown = await readFile(sourceIndex, 'utf8'); } catch { fail(`Missing document for ${object.kind} ${object.id}: ${path.relative(workspaceRoot, sourceIndex)}`); }
+  await auditDocumentMedia({ markdown, objectId: object.id, sourcePath: `${object.data.document}/document.md`, objectDirectory: source });
+  const html = renderDocument(markdown, object.data.label || object.id);
   sourceById.set(object.id, source);
   htmlById.set(object.id, html);
   const links = knownObjectLinks(html, object, objectByPublication);
@@ -205,7 +209,7 @@ function knownObjectLinks(html, sourceObject, targets) {
     const attribute = (node.attrs ?? []).find((entry) => entry.name.toLowerCase() === 'href');
     const location = node.sourceCodeLocation?.attrs?.href;
     if (!attribute || !location) return;
-    const target = resolveObjectHref(`${sourceObject.data.document}/index.html`, attribute.value, targets);
+    const target = resolveObjectHref(`${sourceObject.data.document}/document.md`, attribute.value, targets);
     if (!target) return;
     const suffix = attribute.value.slice(attribute.value.split(/[?#]/, 1)[0].length);
     links.push({ target, suffix, start: location.startOffset, end: location.endOffset });
