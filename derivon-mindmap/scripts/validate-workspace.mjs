@@ -26,9 +26,8 @@ try {
   finish([{ path: '.derivon/workspace.json', message: error.message }]);
 }
 
-// `derivon.workspace/v1` is the only workspace protocol. It has no released predecessor,
-// so a schema string this validator does not know is a broken workspace rather than an old
-// one, and `view` is a field v1 does not have.
+// `derivon.workspace/v1` is the only workspace protocol; an unrecognized schema string is
+// a broken workspace.
 checkObject(manifest, '', ['schema', 'document', 'graph', 'tags'], ['schema', 'document', 'graph']);
 if (manifest.schema !== 'derivon.workspace/v1') issue('/schema', 'expected derivon.workspace/v1');
 checkObject(manifest.document, '/document', ['title', 'description']);
@@ -68,10 +67,7 @@ for (const [index, edge] of hyperedges.entries()) {
 
 finish(issues);
 
-/**
- * Workspace-level tag declarations. They carry no colour: mapping a tag to a colour is a
- * rendering decision, and putting it on disk would move that decision off the renderer.
- */
+/** Workspace-level tag declarations. */
 function checkTags(tags) {
   if (tags === undefined) return;
   if (!Array.isArray(tags)) {
@@ -92,7 +88,7 @@ function checkTags(tags) {
   }
 }
 
-/** Tags belong to concepts only; a derivation has none. */
+/** Tags belong to concepts. */
 function checkConceptTags(tags, location) {
   if (tags === undefined) return;
   if (!Array.isArray(tags)) {

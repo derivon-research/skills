@@ -87,14 +87,12 @@ test('validator accepts a complete workspace and reports authoring errors', asyn
   assert.ok(result.issues.some((entry) => entry.path === '/graph/points/2/data/tags/1'));
 });
 
-test('validator refuses the shapes that preceded derivon.workspace/v1', async (t) => {
+test('validator refuses a schema string it does not know and a manifest carrying view', async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
   const manifestPath = path.join(root, '.derivon/workspace.json');
   const v1 = JSON.parse(await readFile(manifestPath, 'utf8'));
 
-  // v1.0.0 has no released predecessor, so an older schema string is a broken workspace
-  // rather than an old one, and `view` is a field this protocol does not have.
   await writeFile(manifestPath, `${JSON.stringify({ ...v1, schema: 'derivon.authoring/v0.3.0' }, null, 2)}\n`);
   const old = JSON.parse(run(validator, ['--json', root]).stdout);
   assert.ok(old.issues.some((entry) => entry.path === '/schema'));
