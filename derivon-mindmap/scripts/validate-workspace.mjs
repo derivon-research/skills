@@ -26,18 +26,31 @@ try {
   finish([{ path: '.derivon/workspace.json', message: error.message }]);
 }
 
-checkObject(manifest, '', ['schema', 'document', 'graph', 'view']);
-if (manifest.schema !== 'derivon.authoring/v0.3.0') issue('/schema', 'expected derivon.authoring/v0.3.0');
+// `derivon.workspace/v1` is what a workspace is written as. `derivon.authoring/v0.3.0` is
+// still readable as an input dialect, which is why it validates here but keeps its own
+// rules: `view.replacements` belongs to the dialect and is rejected on v1, and declared
+// tags belong to v1 and are rejected on the dialect.
+const DIALECT = 'derivon.authoring/v0.3.0';
+const isDialect = manifest.schema === DIALECT;
+const topLevel = isDialect ? ['schema', 'document', 'graph', 'view'] : ['schema', 'document', 'graph', 'tags'];
+checkObject(manifest, '', topLevel, ['schema', 'document', 'graph']);
+if (manifest.schema !== 'derivon.workspace/v1' && !isDialect) {
+  issue('/schema', `expected derivon.workspace/v1 (or the ${DIALECT} input dialect)`);
+}
 checkObject(manifest.document, '/document', ['title', 'description']);
 if (typeof manifest.document?.title !== 'string') issue('/document/title', 'expected string');
 if (typeof manifest.document?.description !== 'string') issue('/document/description', 'expected string');
 checkObject(manifest.graph, '/graph', ['points', 'hyperedges']);
-checkObject(manifest.view, '/view', ['replacements']);
 points = Array.isArray(manifest.graph?.points) ? manifest.graph.points : [];
 hyperedges = Array.isArray(manifest.graph?.hyperedges) ? manifest.graph.hyperedges : [];
 if (!Array.isArray(manifest.graph?.points)) issue('/graph/points', 'expected array');
 if (!Array.isArray(manifest.graph?.hyperedges)) issue('/graph/hyperedges', 'expected array');
-if (!Array.isArray(manifest.view?.replacements)) issue('/view/replacements', 'expected array');
+if (isDialect) {
+  checkObject(manifest.view, '/view', ['replacements']);
+  if (!Array.isArray(manifest.view?.replacements)) issue('/view/replacements', 'expected array');
+} else {
+  checkTags(manifest.tags);
+}
 
 const cli = spawnSync('derivon', ['validate'], {
   input: JSON.stringify({ points, hyperedges }),
@@ -100,10 +113,51 @@ for (const target of targetIds) {
 }
 finish(issues);
 
+/**
+ * Workspace-level tag declarations. They carry no colour: mapping a tag to a colour is a
+ * rendering decision, and putting it on disk would move that decision off the renderer.
+ */
+function checkTags(tags) {
+  if (tags === undefined) return;
+  if (!Array.isArray(tags)) {
+    issue('/tags', 'expected array');
+    return;
+  }
+  const declared = new Set();
+  for (const [index, tag] of tags.entries()) {
+    const location = `/tags/${index}`;
+    checkObject(tag, location, ['id', 'label', 'description'], ['id', 'label']);
+    if (typeof tag?.id !== 'string' || !tag.id.trim()) issue(`${location}/id`, 'expected non-empty string');
+    else if (declared.has(tag.id)) issue(`${location}/id`, `duplicate tag ID ${tag.id}`);
+    else declared.add(tag.id);
+    if (typeof tag?.label !== 'string' || !tag.label.trim()) issue(`${location}/label`, 'expected non-empty string');
+    if (tag?.description !== undefined && typeof tag.description !== 'string') {
+      issue(`${location}/description`, 'expected string');
+    }
+  }
+}
+
+/** Tags belong to concepts only; a derivation has none. */
+function checkConceptTags(tags, location) {
+  if (tags === undefined) return;
+  if (!Array.isArray(tags)) {
+    issue(location, 'expected array of tag IDs');
+    return;
+  }
+  const seen = new Set();
+  for (const [index, tag] of tags.entries()) {
+    if (typeof tag !== 'string' || !tag.trim()) issue(`${location}/${index}`, 'expected non-empty string');
+    else if (seen.has(tag)) issue(`${location}/${index}`, `duplicate tag ${tag}`);
+    else seen.add(tag);
+  }
+}
+
 async function checkDocument(object, kind, location) {
   const data = object?.data;
-  const fields = kind === 'concept' ? ['label', 'document', 'format'] : ['document', 'format'];
-  checkObject(data, `${location}/data`, fields, fields);
+  const required = kind === 'concept' ? ['label', 'document', 'format'] : ['document', 'format'];
+  const fields = kind === 'concept' ? [...required, 'tags'] : required;
+  checkObject(data, `${location}/data`, fields, required);
+  if (kind === 'concept') checkConceptTags(data?.tags, `${location}/data/tags`);
   if (kind === 'concept' && typeof data?.label !== 'string') issue(`${location}/data/label`, 'expected string');
   if (!['markdown', 'html'].includes(data?.format)) issue(`${location}/data/format`, 'expected markdown or html');
   if (!safeRelativeDirectory(data?.document)) {

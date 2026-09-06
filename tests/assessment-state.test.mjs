@@ -17,7 +17,7 @@ async function fixture() {
   }
   await mkdir(path.join(root, '.derivon'), { recursive: true });
   await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify({
-    schema: 'derivon.authoring/v0.3.0',
+    schema: 'derivon.workspace/v1',
     document: { title: 'Teaching fixture', description: '' },
     graph: {
       points: [
@@ -28,7 +28,6 @@ async function fixture() {
         { id: 'h-ab', weight: 1.5, tails: ['A'], head: 'B', data: { document: 'docs/h-ab', format: 'markdown' } },
       ],
     },
-    view: { replacements: [] },
   }, null, 2)}\n`);
   return root;
 }

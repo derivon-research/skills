@@ -9,7 +9,8 @@ Mindmap workspace correctly.
 
 Issues live in GitHub Issues on `derivon-research/skills`, via the `gh` CLI. Protocol
 issues belong in the repo that owns the protocol (`derivon-research/derivon` for
-`derivon.graph/v1`, `derivon-research/derivon-mindmap` for `derivon.authoring/v0.3.0`).
+`derivon.graph/v1`, `derivon-research/derivon-mindmap` for `derivon.workspace/v1` and
+`derivon.orientation/v1`).
 Strategy and roadmap live in the private `derivon-research/planning` repo, never here. See
 `docs/agents/issue-tracker.md`.
 
