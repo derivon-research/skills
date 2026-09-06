@@ -5,12 +5,6 @@ import { lstat, mkdir, open, readFile, readdir, realpath, rename, rm } from 'nod
 import path from 'node:path';
 import process from 'node:process';
 
-/**
- * The workspace protocol, plus the input dialect a workspace may still be written in.
- * Reading assessment state never rewrites the manifest, so both stay acceptable here.
- */
-const WORKSPACE_SCHEMAS = ['derivon.workspace/v1', 'derivon.authoring/v0.3.0'];
-
 const values = process.argv.slice(2);
 if (values.includes('--help') || values.includes('-h')) {
   usage();
@@ -90,8 +84,8 @@ async function loadWorkspace(input, createTeachingDirectory) {
     throw new Error('Expected a real .derivon/workspace.json file');
   }
   const manifest = parseJson(await readFile(manifestPath, 'utf8'), manifestPath);
-  if (!WORKSPACE_SCHEMAS.includes(manifest?.schema)) {
-    throw new Error(`Teaching state requires one of ${WORKSPACE_SCHEMAS.join(', ')}`);
+  if (manifest?.schema !== 'derivon.workspace/v1') {
+    throw new Error('Teaching state requires derivon.workspace/v1');
   }
   if (!Array.isArray(manifest?.graph?.points) || !Array.isArray(manifest?.graph?.hyperedges)) {
     throw new Error('Workspace manifest has no valid graph arrays');

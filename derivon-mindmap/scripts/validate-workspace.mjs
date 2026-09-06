@@ -26,17 +26,11 @@ try {
   finish([{ path: '.derivon/workspace.json', message: error.message }]);
 }
 
-// `derivon.workspace/v1` is what a workspace is written as. `derivon.authoring/v0.3.0` is
-// still readable as an input dialect, which is why it validates here but keeps its own
-// rules: `view.replacements` belongs to the dialect and is rejected on v1, and declared
-// tags belong to v1 and are rejected on the dialect.
-const DIALECT = 'derivon.authoring/v0.3.0';
-const isDialect = manifest.schema === DIALECT;
-const topLevel = isDialect ? ['schema', 'document', 'graph', 'view'] : ['schema', 'document', 'graph', 'tags'];
-checkObject(manifest, '', topLevel, ['schema', 'document', 'graph']);
-if (manifest.schema !== 'derivon.workspace/v1' && !isDialect) {
-  issue('/schema', `expected derivon.workspace/v1 (or the ${DIALECT} input dialect)`);
-}
+// `derivon.workspace/v1` is the only workspace protocol. It has no released predecessor,
+// so a schema string this validator does not know is a broken workspace rather than an old
+// one, and `view` is a field v1 does not have.
+checkObject(manifest, '', ['schema', 'document', 'graph', 'tags'], ['schema', 'document', 'graph']);
+if (manifest.schema !== 'derivon.workspace/v1') issue('/schema', 'expected derivon.workspace/v1');
 checkObject(manifest.document, '/document', ['title', 'description']);
 if (typeof manifest.document?.title !== 'string') issue('/document/title', 'expected string');
 if (typeof manifest.document?.description !== 'string') issue('/document/description', 'expected string');
@@ -45,12 +39,7 @@ points = Array.isArray(manifest.graph?.points) ? manifest.graph.points : [];
 hyperedges = Array.isArray(manifest.graph?.hyperedges) ? manifest.graph.hyperedges : [];
 if (!Array.isArray(manifest.graph?.points)) issue('/graph/points', 'expected array');
 if (!Array.isArray(manifest.graph?.hyperedges)) issue('/graph/hyperedges', 'expected array');
-if (isDialect) {
-  checkObject(manifest.view, '/view', ['replacements']);
-  if (!Array.isArray(manifest.view?.replacements)) issue('/view/replacements', 'expected array');
-} else {
-  checkTags(manifest.tags);
-}
+checkTags(manifest.tags);
 
 const cli = spawnSync('derivon', ['validate'], {
   input: JSON.stringify({ points, hyperedges }),
@@ -77,40 +66,6 @@ for (const [index, edge] of hyperedges.entries()) {
   await checkDocument(edge, 'derivation', location);
 }
 
-const targetIds = new Set();
-const ownerByMember = new Map();
-for (const [index, replacement] of (manifest.view?.replacements ?? []).entries()) {
-  const location = `/view/replacements/${index}`;
-  checkObject(replacement, location, ['points', 'replaceWith', 'show']);
-  if (!Array.isArray(replacement?.points) || replacement.points.length === 0) issue(`${location}/points`, 'expected a non-empty point ID array');
-  else {
-    const seen = new Set();
-    for (const member of replacement.points) {
-      if (!pointIds.has(member)) issue(`${location}/points`, `unknown point ${String(member)}`);
-      if (seen.has(member)) issue(`${location}/points`, `duplicate member ${String(member)}`);
-      seen.add(member);
-      if (member === replacement.replaceWith) issue(`${location}/points`, 'replacement target cannot be a member');
-      if (ownerByMember.has(member)) issue(`${location}/points`, `member already belongs to replacement ${ownerByMember.get(member)}`);
-      else ownerByMember.set(member, replacement.replaceWith);
-    }
-  }
-  if (!pointIds.has(replacement?.replaceWith)) issue(`${location}/replaceWith`, 'expected an existing point ID');
-  else if (targetIds.has(replacement.replaceWith)) issue(`${location}/replaceWith`, 'target is used by another replacement');
-  else targetIds.add(replacement.replaceWith);
-  if (!['points', 'replacement'].includes(replacement?.show)) issue(`${location}/show`, 'expected points or replacement');
-}
-for (const target of targetIds) {
-  let cursor = target;
-  const visited = new Set();
-  while (ownerByMember.has(cursor)) {
-    if (visited.has(cursor)) {
-      issue('/view/replacements', `replacement cycle contains ${cursor}`);
-      break;
-    }
-    visited.add(cursor);
-    cursor = ownerByMember.get(cursor);
-  }
-}
 finish(issues);
 
 /**
