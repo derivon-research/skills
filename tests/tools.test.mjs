@@ -42,6 +42,7 @@ async function fixture() {
   await mkdir(path.join(root, '.derivon'), { recursive: true });
   await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify({
     schema: 'derivon.workspace/v1',
+    id: 'skills-fixture',
     document: { title: 'Fixture', description: 'Route export fixture' },
     tags: [{ id: 'starting', label: 'Starting points' }],
     graph: {
@@ -99,6 +100,42 @@ test('validator refuses a schema string it does not know and a manifest carrying
   await writeFile(manifestPath, `${JSON.stringify({ ...v1, view: { replacements: [] } }, null, 2)}\n`);
   const carried = JSON.parse(run(validator, ['--json', root]).stdout);
   assert.ok(carried.issues.some((entry) => entry.path === '/view' && entry.message === 'unknown field'));
+});
+
+test('validator requires a workspace id and enforces the protocol rule for it', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const manifestPath = path.join(root, '.derivon/workspace.json');
+  const v1 = JSON.parse(await readFile(manifestPath, 'utf8'));
+  const write = async (id) => {
+    const manifest = { ...v1 };
+    if (id === undefined) delete manifest.id;
+    else manifest.id = id;
+    await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+    return JSON.parse(run(validator, ['--json', root]).stdout);
+  };
+
+  const missing = await write(undefined);
+  assert.ok(missing.issues.some((entry) => entry.path === '/id' && entry.message === 'missing field'));
+
+  // Uppercase is not in the alphabet, so no case variant is folded into a working id.
+  for (const id of ['My-Workspace', 'a/b', 'a\\b', 'a b', '..', '.hidden', '-a', 'a-', '工作区', 'con', 'com9', 'x'.repeat(65)]) {
+    const result = await write(id);
+    assert.equal(result.valid, false, id);
+    assert.ok(result.issues.some((entry) => entry.path === '/id'), id);
+  }
+
+  // A value that is not a string is not an id, whatever JSON type it arrives as.
+  for (const id of [null, 42, true, [], {}, ['a']]) {
+    const result = await write(id);
+    assert.equal(result.valid, false, JSON.stringify(id));
+    assert.ok(result.issues.some((entry) => entry.path === '/id' && entry.message === 'expected string'), JSON.stringify(id));
+  }
+
+  for (const id of ['my-workspace', 'a', 'a1-2b', 'x'.repeat(64), 'console', 'com10', 'aux-2']) {
+    const result = await write(id);
+    assert.deepEqual(result.issues, [], id);
+  }
 });
 
 test('workspace tools reject document symlinks outside the workspace', async (t) => {
