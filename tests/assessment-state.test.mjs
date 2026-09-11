@@ -18,6 +18,7 @@ async function fixture() {
   await mkdir(path.join(root, '.derivon'), { recursive: true });
   await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify({
     schema: 'derivon.workspace/v1',
+    id: 'teaching-fixture',
     document: { title: 'Teaching fixture', description: '' },
     graph: {
       points: [

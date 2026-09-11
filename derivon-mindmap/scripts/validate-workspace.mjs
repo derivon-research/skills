@@ -26,10 +26,25 @@ try {
   finish([{ path: '.derivon/workspace.json', message: error.message }]);
 }
 
+/* The workspace identity. The rule is the workspace protocol's (derivon-mindmap README 的
+ * 「工作区格式」), stated here the same way the schema string is: the validator enforces the
+ * protocol, it does not own it. An id becomes a directory name under the application data
+ * directory, so it is exactly one filesystem-safe path segment. Uppercase is not in the
+ * alphabet, so two ids differing only in case cannot both exist and case is never folded. */
+const WORKSPACE_ID_MAX_LENGTH = 64;
+const WORKSPACE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
+/* Windows refuses to create these as directory names at all. */
+const RESERVED_WORKSPACE_IDS = new Set([
+  'con', 'prn', 'aux', 'nul',
+  ...Array.from({ length: 9 }, (_, index) => `com${index + 1}`),
+  ...Array.from({ length: 9 }, (_, index) => `lpt${index + 1}`),
+]);
+
 // `derivon.workspace/v1` is the only workspace protocol; an unrecognized schema string is
 // a broken workspace.
-checkObject(manifest, '', ['schema', 'document', 'graph', 'tags'], ['schema', 'document', 'graph']);
+checkObject(manifest, '', ['schema', 'id', 'document', 'graph', 'tags'], ['schema', 'id', 'document', 'graph']);
 if (manifest.schema !== 'derivon.workspace/v1') issue('/schema', 'expected derivon.workspace/v1');
+checkWorkspaceId(manifest.id);
 checkObject(manifest.document, '/document', ['title', 'description']);
 if (typeof manifest.document?.title !== 'string') issue('/document/title', 'expected string');
 if (typeof manifest.document?.description !== 'string') issue('/document/description', 'expected string');
@@ -66,6 +81,20 @@ for (const [index, edge] of hyperedges.entries()) {
 }
 
 finish(issues);
+
+/** The identity a workspace cannot be read without. `checkObject` reports a missing one. */
+function checkWorkspaceId(id) {
+  if (id === undefined) return;
+  if (typeof id !== 'string') {
+    issue('/id', 'expected string');
+    return;
+  }
+  if (id.length > WORKSPACE_ID_MAX_LENGTH || !WORKSPACE_ID_PATTERN.test(id)) {
+    issue('/id', 'expected lowercase ASCII letters, digits and hyphens, starting and ending with a letter or digit, at most 64 characters');
+    return;
+  }
+  if (RESERVED_WORKSPACE_IDS.has(id)) issue('/id', `expected a directory name Windows accepts; ${id} is a reserved device name`);
+}
 
 /** Workspace-level tag declarations. */
 function checkTags(tags) {

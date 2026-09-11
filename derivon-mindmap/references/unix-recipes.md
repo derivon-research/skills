@@ -27,19 +27,21 @@ done
 MANIFEST="$ROOT/.derivon/workspace.json"
 ```
 
-For a new workspace, start with only a strict empty v0.3 manifest:
+For a new workspace, name its identity and start with only a strict empty v1 manifest:
 
 ```sh
 set -eu
 ROOT=/absolute/path/to/new-workspace
 SKILL_DIR=/absolute/path/to/installed/derivon-mindmap
+ID=my-workspace
 MANIFEST="$ROOT/.derivon/workspace.json"
 mkdir -p "$ROOT/.derivon"
 [ ! -e "$MANIFEST" ] || { printf '%s\n' "Refusing to replace $MANIFEST" >&2; exit 1; }
 NEXT=$(mktemp "$ROOT/.derivon/workspace.XXXXXX")
 trap 'rm -f "$NEXT"' 0 1 2 15
-jq -n --arg title 'Untitled Mindmap' --arg description '' '{
+jq -n --arg id "$ID" --arg title 'Untitled Mindmap' --arg description '' '{
   schema: "derivon.workspace/v1",
+  id: $id,
   document: {title: $title, description: $description},
   graph: {points: [], hyperedges: []}
 }' > "$NEXT"
@@ -47,6 +49,17 @@ node "$SKILL_DIR/scripts/validate-workspace.mjs" --manifest "$NEXT" "$ROOT"
 mv "$NEXT" "$MANIFEST"
 trap - 0 1 2 15
 ```
+
+The top-level `id` is the workspace's identity: the user names it, `document.title` is only
+the display name, and changing the id in the manifest is changing which workspace this is.
+It becomes a directory name under the application data directory, so it is one filesystem-safe
+path segment: lowercase ASCII letters (`a`–`z`), digits and hyphens only, starting and ending
+with a letter or digit, no `/`, `\`, whitespace or `..`, at most 64 characters, and not a
+Windows reserved device name (`con`, `prn`, `aux`, `nul`, `com1`–`com9`, `lpt1`–`lpt9`).
+Uppercase is not in the alphabet, so case is never folded: the id is read as written, or
+refused. The manifest is a broken workspace without one, and no part of the toolchain fills one
+in. The normative rule is the `derivon-mindmap` README's 「工作区格式」; this recipe states it
+so a shell session needs no second lookup.
 
 Do not initialize sample objects, fake empty-tail entrances, runtime layout,
 workflow state, Agent files, Git metadata, or object directories.
