@@ -19,8 +19,9 @@ learning and explanation. These meanings belong to Mindmap, not to the core CLI.
 - An empty-tail hyperedge is a real entrance only when its head is learnable
   without graph prerequisites. It still has a weight and is not a substitute for
   a route query's learner-known start set.
-- `view.replacements` changes presentation only. It does not assert derivation,
-  equivalence, containment, ontology, or shared cost.
+- Presentation is not graph semantics. `derivon.workspace/v1` carries no replacement
+  view: nothing in the manifest asserts derivation, equivalence, containment,
+  ontology, or shared cost.
 
 Chapter adjacency, chronology, similarity, citation, co-location, and ordinary
 association do not establish a hyperedge. Record such evidence in documents or a

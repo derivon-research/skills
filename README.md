@@ -51,7 +51,7 @@ but no workspace npm dependencies.
 | Skill | Use |
 | --- | --- |
 | `derivon-cli` | Application-independent mathematical model, installation, graph CRUD, queries, subgraphs, and apply. |
-| `derivon-mindmap` | Learning-model semantics, full workspace operations, object documents, replacements, validation, rendering, and route textbook export. |
+| `derivon-mindmap` | Learning-model semantics, workspace changes through the script command surface, object documents, validation, rendering, and route textbook export. |
 | `derivon-book-import` | Source-faithful chapter-by-chapter tutorial-book import. |
 | `derivon-teaching` | Graph/document-read-only assessment with one local persisted state per workspace. |
 | `derivon-exploration` | Agent-led personal learning exploration that grows a graph. |
@@ -111,10 +111,12 @@ npx skills update --project -y
 
 团队项目可以按需安装 `derivon-cli`、`derivon-mindmap` 和一个工作流 Skill，
 由 `skills-lock.json` 固定来源。`derivon-cli` 只定义应用无关的数学模型和 CLI
-协议；学习语义与认知成本属于 `derivon-mindmap`。普通工作区操作使用
-`jq | derivon | jq`，不会用另一层 CRUD wrapper 隐藏 CLI；完整校验、
-概念首次提及交叉引用、Markdown/KaTeX/交互 HTML 发布，以及学习路线教材导出由自包含
-Node 工具处理。
+协议；学习语义与认知成本属于 `derivon-mindmap`。工作区内容只经
+`derivon-workspace.mjs` 命令面变更：一次调用即一次提交，命令内部校验图协议与
+工作区引用规则、先写文档、最后以临时文件加重命名替换清单，并自带清单哈希
+compare-and-swap。读取与查询直接用 `jq | derivon | jq`，不会用另一层 CRUD
+wrapper 隐藏 CLI；概念首次提及交叉引用、Markdown/KaTeX/交互 HTML 校验，以及学习
+路线教材导出也在同一命令面上。
 
 - `derivon-book-import`：按章节忠实导入教程类书籍，只把来源中真实存在的推导写成超边。
 - `derivon-teaching`：不提前泄露答案，保持图与对象文档只读，并将本地用户的精简评估证据持久化到工作区唯一状态文件。

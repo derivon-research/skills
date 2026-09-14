@@ -29013,7 +29013,7 @@ async function auditDocumentMedia({ markdown, objectId, sourcePath, objectDirect
     if (token.type === "image") {
       context.visibleMedia += 1;
       if (!String(token.text ?? "").trim()) {
-        addIssue(context, offset, token.raw, "Markdown images require meaningful nonempty alt text.", "Describe the information the figure contributes inside ![...].");
+        addIssue(context, offset, token.raw, "Markdown images require meaningful nonempty alt text.", "Describe the information the figure contributes inside ![...].", "media-alt");
       }
       context.pending ??= [];
       context.pending.push(checkReference(context, token.href, offset, token.raw, { image: true, role: "Markdown image" }));
@@ -29030,7 +29030,8 @@ async function auditDocumentMedia({ markdown, objectId, sourcePath, objectDirect
         comment.offset,
         comment.snippet,
         "Figure metadata has no visible image or media element.",
-        "Add the real local figure with Markdown image syntax, or report the figure as blocked instead of inserting a placeholder."
+        "Add the real local figure with Markdown image syntax, or report the figure as blocked instead of inserting a placeholder.",
+        "media-placeholder"
       );
     }
   }
@@ -29047,9 +29048,10 @@ function locateToken(markdown, raw, after) {
   const offset = markdown.indexOf(raw, after);
   return offset >= 0 ? offset : markdown.indexOf(raw);
 }
-function addIssue(context, offset, snippet, message, repair) {
+function addIssue(context, offset, snippet, message, repair, code = "media-invalid") {
   const normalizedSnippet = String(snippet ?? "").trim().replace(/\s+/g, " ").slice(0, 180) || "(empty reference)";
   context.issues.push({
+    code,
     objectId: context.objectId,
     sourcePath: context.sourcePath,
     line: lineAt(context.markdown, offset),
@@ -29071,7 +29073,7 @@ async function auditHtml(context, html, baseOffset, baseDirectory) {
   try {
     fragment = parseFragment(html, { sourceCodeLocationInfo: true });
   } catch (error) {
-    addIssue(context, baseOffset, html, `Raw HTML could not be parsed: ${error.message}`, "Repair the HTML before rendering.");
+    addIssue(context, baseOffset, html, `Raw HTML could not be parsed: ${error.message}`, "Repair the HTML before rendering.", "media-html");
     return;
   }
   await visitHtmlNodes(context, fragment.childNodes ?? [], html, baseOffset, baseDirectory);
@@ -29095,14 +29097,14 @@ async function visitHtmlNodes(context, nodes, html, baseOffset, baseDirectory) {
     const attributeOffset = (name50) => baseOffset + (location?.attrs?.[name50]?.startOffset ?? location?.startOffset ?? 0);
     const snippet = location ? html.slice(location.startOffset, location.endOffset).slice(0, 180) : `<${tag}>`;
     if (tag === "base") {
-      addIssue(context, nodeOffset, snippet, "Raw HTML must not change the publication base URL.", "Remove <base>; keep every dependency object-relative.");
+      addIssue(context, nodeOffset, snippet, "Raw HTML must not change the publication base URL.", "Remove <base>; keep every dependency object-relative.", "media-base-url");
     } else if (tag === "img") {
       context.visibleMedia += 1;
       if (!String(attributes.get("alt") ?? "").trim()) {
-        addIssue(context, nodeOffset, snippet, "HTML images require meaningful nonempty alt text.", "Add an alt attribute that describes the figure information.");
+        addIssue(context, nodeOffset, snippet, "HTML images require meaningful nonempty alt text.", "Add an alt attribute that describes the figure information.", "media-alt");
       }
       if (!attributes.has("src") && !attributes.has("srcset")) {
-        addIssue(context, nodeOffset, snippet, "HTML images require a src or srcset reference.", "Reference an object-owned local image.");
+        addIssue(context, nodeOffset, snippet, "HTML images require a src or srcset reference.", "Reference an object-owned local image.", "media-img-source");
       }
       await auditAttribute(context, attributes, "src", attributeOffset("src"), snippet, baseDirectory, { image: true, role: "<img src>" });
       await auditSrcset(context, attributes.get("srcset"), attributeOffset("srcset"), snippet, baseDirectory, "<img srcset>");
@@ -29124,7 +29126,7 @@ async function visitHtmlNodes(context, nodes, html, baseOffset, baseDirectory) {
     } else if (tag === "input" && String(attributes.get("type") ?? "").toLowerCase() === "image") {
       context.visibleMedia += 1;
       if (!String(attributes.get("alt") ?? "").trim()) {
-        addIssue(context, nodeOffset, snippet, "Image inputs require meaningful nonempty alt text.", "Add an alt attribute that names the image action.");
+        addIssue(context, nodeOffset, snippet, "Image inputs require meaningful nonempty alt text.", "Add an alt attribute that names the image action.", "media-alt");
       }
       await auditAttribute(context, attributes, "src", attributeOffset("src"), snippet, baseDirectory, { image: true, role: '<input type="image">' });
     } else if (tag === "svg") {
@@ -29132,7 +29134,7 @@ async function visitHtmlNodes(context, nodes, html, baseOffset, baseDirectory) {
       const title = (node.childNodes ?? []).find((child) => child.tagName?.toLowerCase() === "title");
       const titleText = (title?.childNodes ?? []).map((child) => child.value ?? "").join("").trim();
       if (!String(attributes.get("aria-label") ?? "").trim() && !String(attributes.get("aria-labelledby") ?? "").trim() && !titleText) {
-        addIssue(context, nodeOffset, snippet, "Inline SVG figures require an accessible title or ARIA label.", "Add a nonempty <title>, aria-label, or aria-labelledby value.");
+        addIssue(context, nodeOffset, snippet, "Inline SVG figures require an accessible title or ARIA label.", "Add a nonempty <title>, aria-label, or aria-labelledby value.", "media-svg-accessibility");
       }
     } else if (tag === "canvas") {
       context.visibleMedia += 1;
@@ -29170,11 +29172,11 @@ async function auditSrcset(context, value, offset, snippet, baseDirectory, role)
   try {
     candidates = parseSrcset(value, { strict: true });
   } catch (error) {
-    addIssue(context, offset, snippet, `${role} is invalid: ${error.message}`, "Use a valid srcset with local object-relative image paths.");
+    addIssue(context, offset, snippet, `${role} is invalid: ${error.message}`, "Use a valid srcset with local object-relative image paths.", "media-srcset");
     return;
   }
   if (!candidates.length) {
-    addIssue(context, offset, snippet, `${role} must not be empty.`, "Add at least one local object-relative image candidate.");
+    addIssue(context, offset, snippet, `${role} must not be empty.`, "Add at least one local object-relative image candidate.", "media-srcset");
     return;
   }
   await Promise.all(candidates.map((candidate) => checkReference(context, candidate.url, offset, snippet, {
@@ -29190,7 +29192,7 @@ async function auditCss(context, css, baseOffset, baseDirectory, parseContext) {
     ast = parser_default2(css, { context: parseContext, positions: true });
   } catch (error) {
     const offset = baseOffset + (error.offset ?? 0);
-    addIssue(context, offset, String(css).slice(error.offset ?? 0, (error.offset ?? 0) + 120), `CSS could not be parsed: ${error.message}`, "Repair the CSS before rendering.");
+    addIssue(context, offset, String(css).slice(error.offset ?? 0, (error.offset ?? 0) + 120), `CSS could not be parsed: ${error.message}`, "Repair the CSS before rendering.", "media-css");
     return;
   }
   const references = [];
@@ -29218,7 +29220,7 @@ async function checkReference(context, rawReference, offset, snippet, options = 
   const reference = String(rawReference ?? "").trim();
   const role = options.role ?? "media reference";
   if (!reference) {
-    addIssue(context, offset, snippet, `${role} must not be empty.`, "Use an object-relative local asset path.");
+    addIssue(context, offset, snippet, `${role} must not be empty.`, "Use an object-relative local asset path.", "media-reference");
     return;
   }
   if (reference.startsWith("#")) return;
@@ -29228,7 +29230,8 @@ async function checkReference(context, rawReference, offset, snippet, options = 
       offset,
       reference,
       `${role} must not use a remote, absolute, file, data, blob, or other URL scheme.`,
-      "Copy the authorized asset into this object directory and reference it with a relative path."
+      "Copy the authorized asset into this object directory and reference it with a relative path.",
+      "media-reference"
     );
     return;
   }
@@ -29237,17 +29240,17 @@ async function checkReference(context, rawReference, offset, snippet, options = 
   try {
     decoded = decodeURIComponent(pathPart);
   } catch {
-    addIssue(context, offset, reference, `${role} contains invalid percent encoding.`, "Use a valid object-relative asset path.");
+    addIssue(context, offset, reference, `${role} contains invalid percent encoding.`, "Use a valid object-relative asset path.", "media-reference");
     return;
   }
   if (!decoded) {
-    addIssue(context, offset, reference, `${role} does not identify a local file.`, "Use an object-relative local asset path.");
+    addIssue(context, offset, reference, `${role} does not identify a local file.`, "Use an object-relative local asset path.", "media-reference");
     return;
   }
   const baseDirectory = options.baseDirectory ?? context.objectDirectory;
   const resolved = path2.resolve(baseDirectory, decoded);
   if (resolved === context.objectDirectory || !resolved.startsWith(`${context.objectDirectory}${path2.sep}`)) {
-    addIssue(context, offset, reference, `${role} escapes the owning object directory.`, "Place the asset inside this object directory and use a relative path.");
+    addIssue(context, offset, reference, `${role} escapes the owning object directory.`, "Place the asset inside this object directory and use a relative path.", "media-outside");
     return;
   }
   let stat;
@@ -29255,19 +29258,19 @@ async function checkReference(context, rawReference, offset, snippet, options = 
   try {
     [stat, realAsset] = await Promise.all([lstat(resolved), realpath(resolved)]);
   } catch (error) {
-    addIssue(context, offset, reference, `${role} does not resolve to an existing local file.`, `Add ${decoded} inside the object directory before rendering.`);
+    addIssue(context, offset, reference, `${role} does not resolve to an existing local file.`, `Add ${decoded} inside the object directory before rendering.`, "media-missing");
     return;
   }
   if (!realAsset.startsWith(`${context.realObjectDirectory}${path2.sep}`)) {
-    addIssue(context, offset, reference, `${role} resolves outside the owning object directory.`, "Replace the escaping symlink/path with an object-owned local asset.");
+    addIssue(context, offset, reference, `${role} resolves outside the owning object directory.`, "Replace the escaping symlink/path with an object-owned local asset.", "media-outside");
     return;
   }
   if (!stat.isFile()) {
-    addIssue(context, offset, reference, `${role} must resolve to a regular file.`, "Reference a file rather than a directory or special entry.");
+    addIssue(context, offset, reference, `${role} must resolve to a regular file.`, "Reference a file rather than a directory or special entry.", "media-not-file");
     return;
   }
   if (stat.size === 0) {
-    addIssue(context, offset, reference, `${role} resolves to an empty file.`, "Replace it with a valid nonempty asset.");
+    addIssue(context, offset, reference, `${role} resolves to an empty file.`, "Replace it with a valid nonempty asset.", "media-empty");
     return;
   }
   const relativeAsset = `./${path2.relative(context.objectDirectory, resolved).split(path2.sep).join("/")}`;
@@ -29286,7 +29289,7 @@ async function checkReference(context, rawReference, offset, snippet, options = 
 async function verifyImage(context, filename, relativeAsset, offset, reference) {
   const extension = path2.extname(filename).toLowerCase();
   if (!IMAGE_EXTENSIONS.has(extension)) {
-    addIssue(context, offset, reference, `Unsupported image format for ${relativeAsset}.`, "Use PNG, JPEG, WebP, GIF, SVG, or AVIF. PDF files cannot be embedded as images.");
+    addIssue(context, offset, reference, `Unsupported image format for ${relativeAsset}.`, "Use PNG, JPEG, WebP, GIF, SVG, or AVIF. PDF files cannot be embedded as images.", "media-format");
     return;
   }
   const bytes = await readFile(filename);
@@ -29302,7 +29305,7 @@ async function verifyImage(context, filename, relativeAsset, offset, reference) 
   }
   const expectedType = RASTER_EXTENSIONS.get(extension);
   if (!dimensions || dimensions.type !== expectedType || !Number.isFinite(dimensions.width) || !Number.isFinite(dimensions.height) || dimensions.width <= 0 || dimensions.height <= 0) {
-    addIssue(context, offset, reference, `Image bytes are corrupt or do not match the ${extension} extension.`, "Replace the file with a valid image whose format and extension agree.");
+    addIssue(context, offset, reference, `Image bytes are corrupt or do not match the ${extension} extension.`, "Replace the file with a valid image whose format and extension agree.", "media-corrupt");
   }
 }
 async function verifySvg(context, bytes, filename, offset, reference) {
@@ -29310,7 +29313,7 @@ async function verifySvg(context, bytes, filename, offset, reference) {
   const fragment = parseFragment(source, { sourceCodeLocationInfo: true });
   const root = (fragment.childNodes ?? []).find((node) => node.tagName);
   if (root?.tagName !== "svg") {
-    addIssue(context, offset, reference, "SVG asset does not contain an <svg> root element.", "Replace it with a structurally valid SVG file.");
+    addIssue(context, offset, reference, "SVG asset does not contain an <svg> root element.", "Replace it with a structurally valid SVG file.", "media-corrupt");
     return;
   }
   const attributes = new Map((root.attrs ?? []).map((attribute) => [attribute.name.toLowerCase(), attribute.value]));
@@ -29319,7 +29322,7 @@ async function verifySvg(context, bytes, filename, offset, reference) {
   const viewBox = String(attributes.get("viewbox") ?? "").trim().split(/[\s,]+/).map(Number);
   const positiveViewBox = viewBox.length === 4 && viewBox.every(Number.isFinite) && viewBox[2] > 0 && viewBox[3] > 0;
   if (!(width && height) && !positiveViewBox) {
-    addIssue(context, offset, reference, "SVG asset has no positive width/height or viewBox dimensions.", "Add positive SVG dimensions so publication layout is deterministic.");
+    addIssue(context, offset, reference, "SVG asset has no positive width/height or viewBox dimensions.", "Add positive SVG dimensions so publication layout is deterministic.", "media-svg-dimensions");
   }
   await visitHtmlNodes(context, [root], source, 0, path2.dirname(filename));
 }
@@ -29340,63 +29343,127 @@ async function auditDependencyFile(context, filename, type) {
 import { readFile as readFile2, realpath as realpath2 } from "node:fs/promises";
 import path3 from "node:path";
 import process from "node:process";
+var REPORT_SCHEMA = "derivon.render-report/v1";
 var usage = `Usage:
-  node render-documents.mjs [--stdout] [--manifest <candidate.json>] <workspace> [object-id-or-document ...]
+  node render-documents.mjs [--json] [--stdout] [--manifest <candidate.json>] <workspace> [object-id-or-document ...]
 
 Read-only Markdown/media validation. No workspace HTML files are read or written.
 With --stdout, renders exactly one selected document to stdout for a transient preview.
+With --json, prints a ${REPORT_SCHEMA} report instead of prose.
 The script is self-contained and needs no workspace npm dependencies.`;
 var args = process.argv.slice(2);
-if (takeFlag(args, "--write")) throw new Error("--write is no longer supported: workspace documents persist only document.md.");
+var json = takeFlag(args, "--json");
 var stdout = takeFlag(args, "--stdout");
 var manifestArg = takeValue(args, "--manifest");
+if (takeFlag(args, "--write")) fail("--write is no longer supported: workspace documents persist only document.md.");
 if (takeFlag(args, "--help") || takeFlag(args, "-h")) {
   console.log(usage);
   process.exit(0);
 }
+if (json && stdout) failUsage("--json and --stdout cannot be combined.");
 var workspaceRoot = path3.resolve(args.shift() ?? ".");
-var selectors = new Set(args.map((value) => value.replace(/\/$/, "")));
-var manifestPath = manifestArg ? path3.resolve(manifestArg) : path3.join(workspaceRoot, ".derivon", "workspace.json");
-var manifest = JSON.parse(await readFile2(manifestPath, "utf8"));
-var objects = [
-  ...(manifest.graph?.points ?? []).map((object) => ({ ...object, kind: "concept" })),
-  ...(manifest.graph?.hyperedges ?? []).map((object) => ({ ...object, kind: "derivation" }))
-];
-var selected = objects.filter((object) => !selectors.size || selectors.has(object.id) || selectors.has(object.data?.document) || selectors.has(`${object.data?.document}/document.md`));
-if (selectors.size) {
-  const matched = new Set(selected.flatMap((object) => [object.id, object.data?.document, `${object.data?.document}/document.md`]));
-  const unknown = [...selectors].filter((selector2) => !matched.has(selector2));
-  if (unknown.length) throw new Error(`Unknown object selector(s): ${unknown.join(", ")}`);
-}
-if (stdout && selected.length !== 1) throw new Error("--stdout requires exactly one selected object.");
-var publications = [];
-var mediaIssues = [];
-for (const object of selected) {
-  const directory = await safeWorkspacePath(workspaceRoot, object.data.document);
-  const sourcePath = path3.join(directory, "document.md");
-  const source = await readFile2(sourcePath, "utf8");
+var selectors = args.map((value) => value.replace(/\/$/, ""));
+try {
+  const manifestPath = manifestArg ? path3.resolve(manifestArg) : path3.join(workspaceRoot, ".derivon", "workspace.json");
+  let manifest;
   try {
-    const media = await auditDocumentMedia({
-      markdown: source,
-      objectId: object.id,
-      sourcePath: `${object.data.document}/document.md`,
-      objectDirectory: directory
-    });
-    publications.push({ object, markdown: source, media });
+    manifest = JSON.parse(await readFile2(manifestPath, "utf8"));
   } catch (error) {
-    if (!(error instanceof MediaPreflightError)) throw error;
-    mediaIssues.push(...error.issues);
+    throw codedError(error.message, error instanceof SyntaxError ? "invalid-json" : "io-error");
   }
-}
-if (mediaIssues.length) {
-  console.error(mediaIssues.map(formatMediaIssue).join("\n\n"));
+  const objects = [
+    ...(manifest.graph?.points ?? []).map((object) => ({ ...object, kind: "concept" })),
+    ...(manifest.graph?.hyperedges ?? []).map((object) => ({ ...object, kind: "derivation" }))
+  ];
+  const wanted = new Set(selectors);
+  const selected = objects.filter((object) => !wanted.size || wanted.has(object.id) || wanted.has(object.data?.document) || wanted.has(`${object.data?.document}/document.md`));
+  if (wanted.size) {
+    const matched = new Set(selected.flatMap((object) => [object.id, object.data?.document, `${object.data?.document}/document.md`]));
+    const unknown = [...wanted].filter((selector2) => !matched.has(selector2));
+    if (unknown.length) throw codedError(`Unknown object selector(s): ${unknown.join(", ")}`, "unknown-object");
+  }
+  if (stdout && selected.length !== 1) throw codedError("--stdout requires exactly one selected object.", "usage");
+  const documents = [];
+  const mediaIssues = [];
+  const html = [];
+  for (const object of selected) {
+    const directory = await safeWorkspacePath(workspaceRoot, object.data.document);
+    let markdown;
+    try {
+      markdown = await readFile2(path3.join(directory, "document.md"), "utf8");
+    } catch (error) {
+      throw codedError(error.message, "document-missing");
+    }
+    try {
+      const media = await auditDocumentMedia({
+        markdown,
+        objectId: object.id,
+        sourcePath: `${object.data.document}/document.md`,
+        objectDirectory: directory
+      });
+      documents.push({ id: object.id, mediaCount: media.assets.length, assets: media.assets });
+      if (stdout) html.push(renderDocument(markdown, object.data.label || object.id));
+    } catch (error) {
+      if (!(error instanceof MediaPreflightError)) throw error;
+      mediaIssues.push(...error.issues);
+    }
+  }
+  if (mediaIssues.length) {
+    if (json) emitReport(documents, mediaIssues.map(mediaIssue), 1);
+    else console.error(mediaIssues.map(formatMediaIssue).join("\n\n"));
+    process.exitCode = 1;
+  } else if (stdout) {
+    process.stdout.write(html[0]);
+    process.exitCode = 0;
+  } else if (json) {
+    emitReport(documents, [], 0);
+    process.exitCode = 0;
+  } else {
+    for (const entry of documents) {
+      if (entry.mediaCount) console.log(`Media [${entry.id}] ${entry.mediaCount} local image(s): ${entry.assets.join(", ")}`);
+    }
+    console.log(`Validated ${documents.length} Markdown document(s).`);
+    process.exitCode = 0;
+  }
+} catch (error) {
+  if (json) emitReport([], [{ code: error.code ?? "media-invalid", path: ".", message: error.message }], 1);
+  else console.error(error.message);
   process.exitCode = 1;
-} else {
-  for (const { object, markdown, media } of publications) {
-    if (stdout) process.stdout.write(renderDocument(markdown, object.data.label || object.id));
-    else if (media.assets.length) console.log(`Media [${object.id}] ${media.assets.length} local image(s): ${media.assets.join(", ")}`);
+}
+function mediaIssue(entry) {
+  return {
+    code: entry.code ?? "media-invalid",
+    path: entry.sourcePath,
+    message: `${entry.line}: ${entry.message} Fix: ${entry.repair}`
+  };
+}
+function emitReport(documents, issues, status) {
+  process.stdout.write(`${JSON.stringify({ schema: REPORT_SCHEMA, documents, issues }, null, 2)}
+`);
+  process.exitCode = status;
+}
+function codedError(message, code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+async function safeWorkspacePath(root, relative) {
+  if (typeof relative !== "string" || path3.isAbsolute(relative) || relative.includes("\\")) {
+    throw codedError(`Unsafe document path: ${String(relative)}`, "document-unsafe");
   }
-  if (!stdout) console.log(`Validated ${selected.length} Markdown document(s).`);
+  const resolved = path3.resolve(root, relative);
+  if (resolved === root || !resolved.startsWith(`${root}${path3.sep}`)) throw codedError(`Unsafe document path: ${relative}`, "document-unsafe");
+  let realRoot;
+  let realDirectory;
+  try {
+    [realRoot, realDirectory] = await Promise.all([realpath2(root), realpath2(resolved)]);
+  } catch (error) {
+    throw codedError(error.message, error.code === "ENOENT" ? "document-missing" : "io-error");
+  }
+  if (realDirectory === realRoot || !realDirectory.startsWith(`${realRoot}${path3.sep}`)) {
+    throw codedError(`Document path resolves outside the workspace: ${relative}`, "document-unsafe");
+  }
+  return realDirectory;
 }
 function takeFlag(values, flag) {
   const index = values.indexOf(flag);
@@ -29408,19 +29475,15 @@ function takeValue(values, flag) {
   const index = values.indexOf(flag);
   if (index < 0) return null;
   const value = values[index + 1];
-  if (!value || value.startsWith("--")) throw new Error(`Missing value for ${flag}`);
+  if (!value || value.startsWith("--")) failUsage(`Missing value for ${flag}`);
   values.splice(index, 2);
   return value;
 }
-async function safeWorkspacePath(root, relative) {
-  if (typeof relative !== "string" || path3.isAbsolute(relative) || relative.includes("\\")) {
-    throw new Error(`Unsafe document path: ${String(relative)}`);
-  }
-  const resolved = path3.resolve(root, relative);
-  if (resolved === root || !resolved.startsWith(`${root}${path3.sep}`)) throw new Error(`Unsafe document path: ${relative}`);
-  const [realRoot, realDirectory] = await Promise.all([realpath2(root), realpath2(resolved)]);
-  if (realDirectory === realRoot || !realDirectory.startsWith(`${realRoot}${path3.sep}`)) {
-    throw new Error(`Document path resolves outside the workspace: ${relative}`);
-  }
-  return realDirectory;
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
+function failUsage(message) {
+  console.error(message);
+  process.exit(2);
 }

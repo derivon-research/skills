@@ -40,9 +40,11 @@ decisions, not facts an Agent can verify.
    - definitions or derivation documents that assume their conclusion.
 5. Show the semantic batch summary. When the frontier is empty, explicitly ask
    the user to confirm shared understanding and authorize this batch.
-6. Apply with `derivon apply` and atomic manifest replacement, create/update
-   documents, crosslink exact changed objects against the candidate manifest,
-   render, validate, and report exact graph, source-document, publication, and
+6. Commit with the `derivon-mindmap` command surface (`add-concept`,
+   `add-derivation`, `set-metadata`, `delete-object`, `import`). Each call builds and
+   validates the candidate, writes its document first, and replaces the manifest
+   last, so nothing needs checking first. Then crosslink the exact changed objects,
+   render, and report exact graph, source-document, publication, and
    inserted-reference changes.
 7. Audit routes, isolated points, points not used as tails, unresolved identities,
    and evidence that needs a separate relation layer. Propose but do not write the

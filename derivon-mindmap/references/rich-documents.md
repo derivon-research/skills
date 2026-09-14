@@ -36,12 +36,12 @@ manifest document paths; never guess it from an object ID. The link is reading
 navigation only, not a prerequisite, derivation, containment, replacement, or
 backlink.
 
-After writing a document batch, run `crosslink-documents.mjs --write` for the
-exact changed object IDs before validation. It links unambiguous exact canonical
+After writing a document batch, run `derivon-workspace.mjs crosslink <workspace>
+<object-id>...` for the exact changed object IDs before validation. It links unambiguous exact canonical
 labels in prose while leaving headings, code, math, existing links, raw HTML, and
 image alt text alone. Add semantic aliases manually. Report every source document
-changed by crosslinking. Whole-workspace `--all` use requires a check report and
-confirmation before `--write --all`.
+changed by crosslinking. Whole-workspace `--all` use requires a `--check` report and
+confirmation before `--all`.
 
 ## Static figures and owned assets
 

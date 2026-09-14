@@ -4,68 +4,140 @@ import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 
+const REPORT_SCHEMA = 'derivon.render-report/v1';
 const usage = `Usage:
-  node render-documents.mjs [--stdout] [--manifest <candidate.json>] <workspace> [object-id-or-document ...]
+  node render-documents.mjs [--json] [--stdout] [--manifest <candidate.json>] <workspace> [object-id-or-document ...]
 
 Read-only Markdown/media validation. No workspace HTML files are read or written.
 With --stdout, renders exactly one selected document to stdout for a transient preview.
+With --json, prints a ${REPORT_SCHEMA} report instead of prose.
 The script is self-contained and needs no workspace npm dependencies.`;
+
 const args = process.argv.slice(2);
-if (takeFlag(args, '--write')) throw new Error('--write is no longer supported: workspace documents persist only document.md.');
+const json = takeFlag(args, '--json');
 const stdout = takeFlag(args, '--stdout');
 const manifestArg = takeValue(args, '--manifest');
+if (takeFlag(args, '--write')) fail('--write is no longer supported: workspace documents persist only document.md.');
 if (takeFlag(args, '--help') || takeFlag(args, '-h')) {
   console.log(usage);
   process.exit(0);
 }
+if (json && stdout) failUsage('--json and --stdout cannot be combined.');
+
 const workspaceRoot = path.resolve(args.shift() ?? '.');
-const selectors = new Set(args.map((value) => value.replace(/\/$/, '')));
-const manifestPath = manifestArg ? path.resolve(manifestArg) : path.join(workspaceRoot, '.derivon', 'workspace.json');
-const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-const objects = [
-  ...(manifest.graph?.points ?? []).map((object) => ({ ...object, kind: 'concept' })),
-  ...(manifest.graph?.hyperedges ?? []).map((object) => ({ ...object, kind: 'derivation' })),
-];
-const selected = objects.filter((object) => !selectors.size
-  || selectors.has(object.id)
-  || selectors.has(object.data?.document)
-  || selectors.has(`${object.data?.document}/document.md`));
-if (selectors.size) {
-  const matched = new Set(selected.flatMap((object) => [object.id, object.data?.document, `${object.data?.document}/document.md`]));
-  const unknown = [...selectors].filter((selector) => !matched.has(selector));
-  if (unknown.length) throw new Error(`Unknown object selector(s): ${unknown.join(', ')}`);
-}
+const selectors = args.map((value) => value.replace(/\/$/, ''));
 
-if (stdout && selected.length !== 1) throw new Error('--stdout requires exactly one selected object.');
-const publications = [];
-const mediaIssues = [];
-for (const object of selected) {
-  const directory = await safeWorkspacePath(workspaceRoot, object.data.document);
-  const sourcePath = path.join(directory, 'document.md');
-  const source = await readFile(sourcePath, 'utf8');
+try {
+  const manifestPath = manifestArg ? path.resolve(manifestArg) : path.join(workspaceRoot, '.derivon', 'workspace.json');
+  let manifest;
   try {
-    const media = await auditDocumentMedia({
-      markdown: source,
-      objectId: object.id,
-      sourcePath: `${object.data.document}/document.md`,
-      objectDirectory: directory,
-    });
-    publications.push({ object, markdown: source, media });
+    manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   } catch (error) {
-    if (!(error instanceof MediaPreflightError)) throw error;
-    mediaIssues.push(...error.issues);
+    throw codedError(error.message, error instanceof SyntaxError ? 'invalid-json' : 'io-error');
   }
+  const objects = [
+    ...(manifest.graph?.points ?? []).map((object) => ({ ...object, kind: 'concept' })),
+    ...(manifest.graph?.hyperedges ?? []).map((object) => ({ ...object, kind: 'derivation' })),
+  ];
+  const wanted = new Set(selectors);
+  const selected = objects.filter((object) => !wanted.size
+    || wanted.has(object.id)
+    || wanted.has(object.data?.document)
+    || wanted.has(`${object.data?.document}/document.md`));
+  if (wanted.size) {
+    const matched = new Set(selected.flatMap((object) => [object.id, object.data?.document, `${object.data?.document}/document.md`]));
+    const unknown = [...wanted].filter((selector) => !matched.has(selector));
+    if (unknown.length) throw codedError(`Unknown object selector(s): ${unknown.join(', ')}`, 'unknown-object');
+  }
+  if (stdout && selected.length !== 1) throw codedError('--stdout requires exactly one selected object.', 'usage');
+
+  const documents = [];
+  const mediaIssues = [];
+  const html = [];
+  for (const object of selected) {
+    const directory = await safeWorkspacePath(workspaceRoot, object.data.document);
+    let markdown;
+    try {
+      markdown = await readFile(path.join(directory, 'document.md'), 'utf8');
+    } catch (error) {
+      throw codedError(error.message, 'document-missing');
+    }
+    try {
+      const media = await auditDocumentMedia({
+        markdown,
+        objectId: object.id,
+        sourcePath: `${object.data.document}/document.md`,
+        objectDirectory: directory,
+      });
+      documents.push({ id: object.id, mediaCount: media.assets.length, assets: media.assets });
+      if (stdout) html.push(renderDocument(markdown, object.data.label || object.id));
+    } catch (error) {
+      if (!(error instanceof MediaPreflightError)) throw error;
+      mediaIssues.push(...error.issues);
+    }
+  }
+
+  if (mediaIssues.length) {
+    if (json) emitReport(documents, mediaIssues.map(mediaIssue), 1);
+    else console.error(mediaIssues.map(formatMediaIssue).join('\n\n'));
+    process.exitCode = 1;
+  } else if (stdout) {
+    /* Written through the stream, not `writeSync`: a pipe write can be partial, and the process
+     * must drain it before exiting. */
+    process.stdout.write(html[0]);
+    process.exitCode = 0;
+  } else if (json) {
+    emitReport(documents, [], 0);
+    process.exitCode = 0;
+  } else {
+    for (const entry of documents) {
+      if (entry.mediaCount) console.log(`Media [${entry.id}] ${entry.mediaCount} local image(s): ${entry.assets.join(', ')}`);
+    }
+    console.log(`Validated ${documents.length} Markdown document(s).`);
+    process.exitCode = 0;
+  }
+} catch (error) {
+  if (json) emitReport([], [{ code: error.code ?? 'media-invalid', path: '.', message: error.message }], 1);
+  else console.error(error.message);
+  process.exitCode = 1;
 }
 
-if (mediaIssues.length) {
-  console.error(mediaIssues.map(formatMediaIssue).join('\n\n'));
-  process.exitCode = 1;
-} else {
-  for (const { object, markdown, media } of publications) {
-    if (stdout) process.stdout.write(renderDocument(markdown, object.data.label || object.id));
-    else if (media.assets.length) console.log(`Media [${object.id}] ${media.assets.length} local image(s): ${media.assets.join(', ')}`);
+function mediaIssue(entry) {
+  return {
+    code: entry.code ?? 'media-invalid',
+    path: entry.sourcePath,
+    message: `${entry.line}: ${entry.message} Fix: ${entry.repair}`,
+  };
+}
+
+function emitReport(documents, issues, status) {
+  process.stdout.write(`${JSON.stringify({ schema: REPORT_SCHEMA, documents, issues }, null, 2)}\n`);
+  process.exitCode = status;
+}
+
+function codedError(message, code) {
+  const error = new Error(message);
+  error.code = code;
+  return error;
+}
+
+async function safeWorkspacePath(root, relative) {
+  if (typeof relative !== 'string' || path.isAbsolute(relative) || relative.includes('\\')) {
+    throw codedError(`Unsafe document path: ${String(relative)}`, 'document-unsafe');
   }
-  if (!stdout) console.log(`Validated ${selected.length} Markdown document(s).`);
+  const resolved = path.resolve(root, relative);
+  if (resolved === root || !resolved.startsWith(`${root}${path.sep}`)) throw codedError(`Unsafe document path: ${relative}`, 'document-unsafe');
+  let realRoot;
+  let realDirectory;
+  try {
+    [realRoot, realDirectory] = await Promise.all([realpath(root), realpath(resolved)]);
+  } catch (error) {
+    throw codedError(error.message, error.code === 'ENOENT' ? 'document-missing' : 'io-error');
+  }
+  if (realDirectory === realRoot || !realDirectory.startsWith(`${realRoot}${path.sep}`)) {
+    throw codedError(`Document path resolves outside the workspace: ${relative}`, 'document-unsafe');
+  }
+  return realDirectory;
 }
 
 function takeFlag(values, flag) {
@@ -79,20 +151,17 @@ function takeValue(values, flag) {
   const index = values.indexOf(flag);
   if (index < 0) return null;
   const value = values[index + 1];
-  if (!value || value.startsWith('--')) throw new Error(`Missing value for ${flag}`);
+  if (!value || value.startsWith('--')) failUsage(`Missing value for ${flag}`);
   values.splice(index, 2);
   return value;
 }
 
-async function safeWorkspacePath(root, relative) {
-  if (typeof relative !== 'string' || path.isAbsolute(relative) || relative.includes('\\')) {
-    throw new Error(`Unsafe document path: ${String(relative)}`);
-  }
-  const resolved = path.resolve(root, relative);
-  if (resolved === root || !resolved.startsWith(`${root}${path.sep}`)) throw new Error(`Unsafe document path: ${relative}`);
-  const [realRoot, realDirectory] = await Promise.all([realpath(root), realpath(resolved)]);
-  if (realDirectory === realRoot || !realDirectory.startsWith(`${realRoot}${path.sep}`)) {
-    throw new Error(`Document path resolves outside the workspace: ${relative}`);
-  }
-  return realDirectory;
+function fail(message) {
+  console.error(message);
+  process.exit(1);
+}
+
+function failUsage(message) {
+  console.error(message);
+  process.exit(2);
 }

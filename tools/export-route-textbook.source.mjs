@@ -1,4 +1,5 @@
 import { cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { writeSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { parse } from 'parse5';
@@ -9,17 +10,22 @@ import process from 'node:process';
 
 const MARKER_SCHEMA = 'derivon.textbook-output/v1';
 const ROUTE_SCHEMA = 'derivon.textbook-route/v1';
+const REPORT_SCHEMA = 'derivon.textbook-report/v1';
 const args = process.argv.slice(2);
+const json = takeFlag('--json');
+/* The failure report carries whatever was already built, so a refused export still tells the
+ * caller where it was heading. */
+const failure = { output: null, chapters: [], references: [] };
 if (takeFlag('--help') || takeFlag('-h')) {
   console.log(`Usage:
-  node export-route-textbook.mjs <workspace> --output <directory>
+  node export-route-textbook.mjs [--json] <workspace> --output <directory>
     [--start <point>]... --target <point> [--target <point>]...
     [--max-nodes <n>] [--max-millis <n>] [--max-references <n>]
     [--allow-approximate] [--force] [--serve] [--port <n>]`);
   process.exit(0);
 }
 const workspaceRoot = path.resolve(args.shift() ?? '.');
-const outputArg = takeValue('--output', true);
+const outputArg = takeRequiredValue('--output');
 const starts = takeValues('--start');
 const targets = takeValues('--target');
 const maxNodes = takeValue('--max-nodes') ?? '200000';
@@ -29,17 +35,23 @@ const allowApproximate = takeFlag('--allow-approximate');
 const force = takeFlag('--force');
 const serve = takeFlag('--serve');
 const port = Number(takeValue('--port') ?? 0);
-if (args.length) fail(`Unexpected argument: ${args[0]}`, 2);
-if (!targets.length) fail('At least one --target is required.', 2);
-if (!/^\d+$/.test(maxNodes) || !/^\d+$/.test(maxMillis)) fail('Route budgets must be non-negative integers.', 2);
-if (!/^\d+$/.test(maxReferences)) fail('--max-references must be a non-negative integer.', 2);
-if (!Number.isInteger(port) || port < 0 || port > 65535) fail('Invalid --port.', 2);
+if (args.length) fail(`Unexpected argument: ${args[0]}`, 2, 'usage');
+if (!targets.length) fail('At least one --target is required.', 2, 'usage');
+if (!/^\d+$/.test(maxNodes) || !/^\d+$/.test(maxMillis)) fail('Route budgets must be non-negative integers.', 2, 'usage');
+if (!/^\d+$/.test(maxReferences)) fail('--max-references must be a non-negative integer.', 2, 'usage');
+if (!Number.isInteger(port) || port < 0 || port > 65535) fail('Invalid --port.', 2, 'usage');
 const outputRoot = path.resolve(outputArg);
 if (outputRoot === workspaceRoot || outputRoot.startsWith(`${workspaceRoot}${path.sep}.derivon${path.sep}`)) {
-  fail('Output cannot replace the workspace or live under .derivon.', 2);
+  fail('Output cannot replace the workspace or live under .derivon.', 2, 'usage');
 }
+failure.output = outputRoot;
 
-const manifest = JSON.parse(await readFile(path.join(workspaceRoot, '.derivon', 'workspace.json'), 'utf8'));
+let manifest;
+try {
+  manifest = JSON.parse(await readFile(path.join(workspaceRoot, '.derivon', 'workspace.json'), 'utf8'));
+} catch (error) {
+  fail(`Cannot read the workspace manifest: ${error.message}`, 1, error instanceof SyntaxError ? 'invalid-json' : 'io-error');
+}
 const graph = manifest.graph;
 const routeArgs = ['query', 'route'];
 for (const id of starts) routeArgs.push('--start', id);
@@ -48,25 +60,31 @@ routeArgs.push('--max-nodes', maxNodes, '--max-millis', maxMillis);
 const solved = spawnSync('derivon', routeArgs, {
   input: JSON.stringify(graph), encoding: 'utf8', maxBuffer: 64 * 1024 * 1024,
 });
-if (solved.error?.code === 'ENOENT') fail('derivon CLI is not installed or not on PATH.');
-if (solved.status !== 0) fail((solved.stderr || solved.stdout).trim());
-const route = JSON.parse(solved.stdout);
+if (solved.error?.code === 'ENOENT') fail('derivon CLI is not installed or not on PATH.', 1, 'external-tool');
+if (solved.status !== 0) fail((solved.stderr || solved.stdout).trim(), 1, 'graph-invalid');
+let route;
+try {
+  route = JSON.parse(solved.stdout);
+} catch (error) {
+  fail(`derivon returned no usable route: ${error.message}`, 1, 'graph-invalid');
+}
 if (!route.reachable) {
   const diagnoses = (route.targetDiagnoses ?? []).map((entry) => `${entry.targetPointId}: blocking=${entry.blockingPointIds.join(',') || 'none'} cycles=${entry.cycles.length}`).join('\n');
-  fail(`Route is unreachable.\n${diagnoses}`);
+  fail(`Route is unreachable.\n${diagnoses}`, 1, 'route-unreachable');
 }
-if (!route.provenOptimal && !allowApproximate) fail('Route is not proven optimal. Increase the budget or pass --allow-approximate.');
+if (!route.provenOptimal && !allowApproximate) fail('Route is not proven optimal. Increase the budget or pass --allow-approximate.', 1, 'route-not-optimal');
 
 const pointById = new Map(graph.points.map((point) => [point.id, { ...point, kind: 'concept' }]));
 const edgeById = new Map(graph.hyperedges.map((edge) => [edge.id, { ...edge, kind: 'derivation' }]));
 const objectById = new Map([...pointById, ...edgeById]);
 const objectByPublication = new Map([...objectById.values()].map((object) => [normalizeWorkspacePath(`${object.data.document}/document.md`), object]));
 const sequence = [];
+failure.chapters = sequence;
 const seenPoints = new Set();
 for (const id of route.startPointIds) addPoint(id, 'prerequisite');
 for (const edgeId of route.executableOrder) {
   const edge = edgeById.get(edgeId);
-  if (!edge) fail(`Route references unknown hyperedge ${edgeId}.`);
+  if (!edge) fail(`Route references unknown hyperedge ${edgeId}.`, 1, 'graph-invalid');
   sequence.push(entryFor(edge, 'derivation'));
   if (!seenPoints.has(edge.head)) addPoint(edge.head, 'conclusion');
 }
@@ -74,6 +92,7 @@ for (const id of route.pointIds) if (!seenPoints.has(id)) addPoint(id, 'route-co
 
 const routeIds = new Set(sequence.map((entry) => entry.id));
 const references = [];
+failure.references = references;
 const referrers = new Map();
 const sourceById = new Map();
 const htmlById = new Map();
@@ -86,8 +105,8 @@ for (let cursor = 0; cursor < queue.length; cursor += 1) {
   await rejectSymbolicLinks(source);
   const sourceIndex = path.join(source, 'document.md');
   let markdown;
-  try { markdown = await readFile(sourceIndex, 'utf8'); } catch { fail(`Missing document for ${object.kind} ${object.id}: ${path.relative(workspaceRoot, sourceIndex)}`); }
-  await auditDocumentMedia({ markdown, objectId: object.id, sourcePath: `${object.data.document}/document.md`, objectDirectory: source });
+  try { markdown = await readFile(sourceIndex, 'utf8'); } catch { fail(`Missing document for ${object.kind} ${object.id}: ${path.relative(workspaceRoot, sourceIndex)}`, 1, 'document-missing'); }
+  await auditDocumentMediaOrFail({ markdown, objectId: object.id, sourcePath: `${object.data.document}/document.md`, objectDirectory: source });
   const html = renderDocument(markdown, object.data.label || object.id);
   sourceById.set(object.id, source);
   htmlById.set(object.id, html);
@@ -149,13 +168,24 @@ try {
   await rm(stageRoot, { recursive: true, force: true });
   throw error;
 }
-console.log(`Exported textbook: ${outputRoot}`);
+if (json) {
+  process.stdout.write(`${JSON.stringify({
+    schema: REPORT_SCHEMA,
+    output: outputRoot,
+    chapters: sequence,
+    references: references.map((entry) => ({ ...entry, referrerIds: [...(referrers.get(entry.id) ?? [])] })),
+    issues: [],
+  }, null, 2)}\n`);
+  console.error(`Exported textbook: ${outputRoot}`);
+} else {
+  console.log(`Exported textbook: ${outputRoot}`);
+}
 
 if (serve) await serveDirectory(outputRoot, port);
 
 function addPoint(id, role) {
   const point = pointById.get(id);
-  if (!point) fail(`Route references unknown point ${id}.`);
+  if (!point) fail(`Route references unknown point ${id}.`, 1, 'graph-invalid');
   seenPoints.add(id);
   sequence.push(entryFor(point, role));
 }
@@ -171,10 +201,10 @@ function entryFor(object, role) {
 async function prepareStage(output, overwrite) {
   try {
     await stat(output);
-    if (!overwrite) fail(`Output already exists: ${output}. Pass --force to replace a recognized textbook output.`);
+    if (!overwrite) fail(`Output already exists: ${output}. Pass --force to replace a recognized textbook output.`, 1, 'output-exists');
     let marker;
-    try { marker = JSON.parse(await readFile(path.join(output, '.derivon-textbook.json'), 'utf8')); } catch { fail(`Refusing to replace unrecognized output directory: ${output}`); }
-    if (marker.schema !== MARKER_SCHEMA) fail(`Refusing to replace unrecognized output directory: ${output}`);
+    try { marker = JSON.parse(await readFile(path.join(output, '.derivon-textbook.json'), 'utf8')); } catch { fail(`Refusing to replace unrecognized output directory: ${output}`, 1, 'output-exists'); }
+    if (marker.schema !== MARKER_SCHEMA) fail(`Refusing to replace unrecognized output directory: ${output}`, 1, 'output-exists');
   } catch (error) {
     if (error.code !== 'ENOENT') throw error;
   }
@@ -186,18 +216,24 @@ async function finalizeStage(stage, output) {
   await rename(stage, output);
 }
 async function safeWorkspaceDirectory(root, relative) {
-  if (typeof relative !== 'string' || path.isAbsolute(relative) || relative.includes('\\')) fail(`Unsafe document path: ${String(relative)}`);
+  if (typeof relative !== 'string' || path.isAbsolute(relative) || relative.includes('\\')) fail(`Unsafe document path: ${String(relative)}`, 1, 'document-unsafe');
   const resolved = path.resolve(root, relative);
-  if (resolved === root || !resolved.startsWith(`${root}${path.sep}`)) fail(`Unsafe document path: ${relative}`);
-  const [realRoot, realDirectory] = await Promise.all([realpath(root), realpath(resolved)]);
-  if (realDirectory === realRoot || !realDirectory.startsWith(`${realRoot}${path.sep}`)) fail(`Document path resolves outside the workspace: ${relative}`);
+  if (resolved === root || !resolved.startsWith(`${root}${path.sep}`)) fail(`Unsafe document path: ${relative}`, 1, 'document-unsafe');
+  let realRoot;
+  let realDirectory;
+  try {
+    [realRoot, realDirectory] = await Promise.all([realpath(root), realpath(resolved)]);
+  } catch (error) {
+    fail(`Cannot resolve document directory ${relative}: ${error.message}`, 1, error.code === 'ENOENT' ? 'document-missing' : 'io-error');
+  }
+  if (realDirectory === realRoot || !realDirectory.startsWith(`${realRoot}${path.sep}`)) fail(`Document path resolves outside the workspace: ${relative}`, 1, 'document-unsafe');
   return realDirectory;
 }
 async function rejectSymbolicLinks(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const current = path.join(directory, entry.name);
     const info = await lstat(current);
-    if (info.isSymbolicLink()) fail(`Refusing symbolic link in document directory: ${current}`);
+    if (info.isSymbolicLink()) fail(`Refusing symbolic link in document directory: ${current}`, 1, 'document-unsafe');
     if (info.isDirectory()) await rejectSymbolicLinks(current);
   }
 }
@@ -291,6 +327,28 @@ function mime(file) {
 }
 function escapeHtml(value) { return String(value).replaceAll('&', '&amp;').replaceAll('<', '&lt;').replaceAll('>', '&gt;').replaceAll('"', '&quot;'); }
 function takeFlag(flag) { const index = args.indexOf(flag); if (index < 0) return false; args.splice(index, 1); return true; }
-function takeValue(flag, required = false) { const index = args.indexOf(flag); if (index < 0) { if (required) fail(`Missing ${flag}.`, 2); return null; } const value = args[index + 1]; if (!value || value.startsWith('--')) fail(`Missing value for ${flag}.`, 2); args.splice(index, 2); return value; }
+function takeValue(flag) { const index = args.indexOf(flag); if (index < 0) return null; const value = args[index + 1]; if (!value || value.startsWith('--')) fail(`Missing value for ${flag}.`, 2, 'usage'); args.splice(index, 2); return value; }
+function takeRequiredValue(flag) { const value = takeValue(flag); if (value === null) fail(`Missing ${flag}.`, 2, 'usage'); return value; }
 function takeValues(flag) { const values = []; for (;;) { const value = takeValue(flag); if (value === null) return values; values.push(value); } }
-function fail(message, code = 1) { console.error(message); process.exit(code); }
+/* Media failures are the one class that reaches here as a thrown value, so they are converted
+ * into the same coded refusal as every other exporter failure. */
+async function auditDocumentMediaOrFail(options) {
+  try {
+    await auditDocumentMedia(options);
+  } catch (error) {
+    if (Array.isArray(error?.issues)) {
+      fail(error.issues.map((entry) => `${entry.sourcePath}:${entry.line}: ${entry.message}`).join('\n'), 1, error.issues[0].code ?? 'media-invalid');
+    }
+    throw error;
+  }
+}
+
+function fail(message, code = 1, diagnostic = 'io-error') {
+  if (json) {
+    /* One synchronous write of a small report, then exit: a queued stream write would be lost. */
+    writeSync(1, `${JSON.stringify({ schema: REPORT_SCHEMA, output: failure.output, chapters: failure.chapters, references: failure.references, issues: [{ code: diagnostic, path: '.', message }] }, null, 2)}\n`);
+  } else {
+    console.error(message);
+  }
+  process.exit(code);
+}

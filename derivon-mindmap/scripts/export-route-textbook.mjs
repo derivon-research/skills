@@ -7,6 +7,7 @@ var __export = (target, all) => {
 
 // tools/export-route-textbook.source.mjs
 import { cp, lstat as lstat2, mkdir, mkdtemp, readFile as readFile2, readdir, realpath as realpath2, rename, rm, stat, writeFile } from "node:fs/promises";
+import { writeSync } from "node:fs";
 import { spawnSync } from "node:child_process";
 import { createServer } from "node:http";
 
@@ -29021,7 +29022,7 @@ async function auditDocumentMedia({ markdown, objectId, sourcePath, objectDirect
     if (token.type === "image") {
       context.visibleMedia += 1;
       if (!String(token.text ?? "").trim()) {
-        addIssue(context, offset, token.raw, "Markdown images require meaningful nonempty alt text.", "Describe the information the figure contributes inside ![...].");
+        addIssue(context, offset, token.raw, "Markdown images require meaningful nonempty alt text.", "Describe the information the figure contributes inside ![...].", "media-alt");
       }
       context.pending ??= [];
       context.pending.push(checkReference(context, token.href, offset, token.raw, { image: true, role: "Markdown image" }));
@@ -29038,7 +29039,8 @@ async function auditDocumentMedia({ markdown, objectId, sourcePath, objectDirect
         comment.offset,
         comment.snippet,
         "Figure metadata has no visible image or media element.",
-        "Add the real local figure with Markdown image syntax, or report the figure as blocked instead of inserting a placeholder."
+        "Add the real local figure with Markdown image syntax, or report the figure as blocked instead of inserting a placeholder.",
+        "media-placeholder"
       );
     }
   }
@@ -29049,9 +29051,10 @@ function locateToken(markdown, raw, after) {
   const offset = markdown.indexOf(raw, after);
   return offset >= 0 ? offset : markdown.indexOf(raw);
 }
-function addIssue(context, offset, snippet, message, repair) {
+function addIssue(context, offset, snippet, message, repair, code = "media-invalid") {
   const normalizedSnippet = String(snippet ?? "").trim().replace(/\s+/g, " ").slice(0, 180) || "(empty reference)";
   context.issues.push({
+    code,
     objectId: context.objectId,
     sourcePath: context.sourcePath,
     line: lineAt(context.markdown, offset),
@@ -29073,7 +29076,7 @@ async function auditHtml(context, html, baseOffset, baseDirectory) {
   try {
     fragment = parseFragment(html, { sourceCodeLocationInfo: true });
   } catch (error) {
-    addIssue(context, baseOffset, html, `Raw HTML could not be parsed: ${error.message}`, "Repair the HTML before rendering.");
+    addIssue(context, baseOffset, html, `Raw HTML could not be parsed: ${error.message}`, "Repair the HTML before rendering.", "media-html");
     return;
   }
   await visitHtmlNodes(context, fragment.childNodes ?? [], html, baseOffset, baseDirectory);
@@ -29097,14 +29100,14 @@ async function visitHtmlNodes(context, nodes, html, baseOffset, baseDirectory) {
     const attributeOffset = (name50) => baseOffset + (location?.attrs?.[name50]?.startOffset ?? location?.startOffset ?? 0);
     const snippet = location ? html.slice(location.startOffset, location.endOffset).slice(0, 180) : `<${tag}>`;
     if (tag === "base") {
-      addIssue(context, nodeOffset, snippet, "Raw HTML must not change the publication base URL.", "Remove <base>; keep every dependency object-relative.");
+      addIssue(context, nodeOffset, snippet, "Raw HTML must not change the publication base URL.", "Remove <base>; keep every dependency object-relative.", "media-base-url");
     } else if (tag === "img") {
       context.visibleMedia += 1;
       if (!String(attributes.get("alt") ?? "").trim()) {
-        addIssue(context, nodeOffset, snippet, "HTML images require meaningful nonempty alt text.", "Add an alt attribute that describes the figure information.");
+        addIssue(context, nodeOffset, snippet, "HTML images require meaningful nonempty alt text.", "Add an alt attribute that describes the figure information.", "media-alt");
       }
       if (!attributes.has("src") && !attributes.has("srcset")) {
-        addIssue(context, nodeOffset, snippet, "HTML images require a src or srcset reference.", "Reference an object-owned local image.");
+        addIssue(context, nodeOffset, snippet, "HTML images require a src or srcset reference.", "Reference an object-owned local image.", "media-img-source");
       }
       await auditAttribute(context, attributes, "src", attributeOffset("src"), snippet, baseDirectory, { image: true, role: "<img src>" });
       await auditSrcset(context, attributes.get("srcset"), attributeOffset("srcset"), snippet, baseDirectory, "<img srcset>");
@@ -29126,7 +29129,7 @@ async function visitHtmlNodes(context, nodes, html, baseOffset, baseDirectory) {
     } else if (tag === "input" && String(attributes.get("type") ?? "").toLowerCase() === "image") {
       context.visibleMedia += 1;
       if (!String(attributes.get("alt") ?? "").trim()) {
-        addIssue(context, nodeOffset, snippet, "Image inputs require meaningful nonempty alt text.", "Add an alt attribute that names the image action.");
+        addIssue(context, nodeOffset, snippet, "Image inputs require meaningful nonempty alt text.", "Add an alt attribute that names the image action.", "media-alt");
       }
       await auditAttribute(context, attributes, "src", attributeOffset("src"), snippet, baseDirectory, { image: true, role: '<input type="image">' });
     } else if (tag === "svg") {
@@ -29134,7 +29137,7 @@ async function visitHtmlNodes(context, nodes, html, baseOffset, baseDirectory) {
       const title = (node.childNodes ?? []).find((child) => child.tagName?.toLowerCase() === "title");
       const titleText = (title?.childNodes ?? []).map((child) => child.value ?? "").join("").trim();
       if (!String(attributes.get("aria-label") ?? "").trim() && !String(attributes.get("aria-labelledby") ?? "").trim() && !titleText) {
-        addIssue(context, nodeOffset, snippet, "Inline SVG figures require an accessible title or ARIA label.", "Add a nonempty <title>, aria-label, or aria-labelledby value.");
+        addIssue(context, nodeOffset, snippet, "Inline SVG figures require an accessible title or ARIA label.", "Add a nonempty <title>, aria-label, or aria-labelledby value.", "media-svg-accessibility");
       }
     } else if (tag === "canvas") {
       context.visibleMedia += 1;
@@ -29172,11 +29175,11 @@ async function auditSrcset(context, value, offset, snippet, baseDirectory, role)
   try {
     candidates = parseSrcset(value, { strict: true });
   } catch (error) {
-    addIssue(context, offset, snippet, `${role} is invalid: ${error.message}`, "Use a valid srcset with local object-relative image paths.");
+    addIssue(context, offset, snippet, `${role} is invalid: ${error.message}`, "Use a valid srcset with local object-relative image paths.", "media-srcset");
     return;
   }
   if (!candidates.length) {
-    addIssue(context, offset, snippet, `${role} must not be empty.`, "Add at least one local object-relative image candidate.");
+    addIssue(context, offset, snippet, `${role} must not be empty.`, "Add at least one local object-relative image candidate.", "media-srcset");
     return;
   }
   await Promise.all(candidates.map((candidate) => checkReference(context, candidate.url, offset, snippet, {
@@ -29192,7 +29195,7 @@ async function auditCss(context, css, baseOffset, baseDirectory, parseContext) {
     ast = parser_default2(css, { context: parseContext, positions: true });
   } catch (error) {
     const offset = baseOffset + (error.offset ?? 0);
-    addIssue(context, offset, String(css).slice(error.offset ?? 0, (error.offset ?? 0) + 120), `CSS could not be parsed: ${error.message}`, "Repair the CSS before rendering.");
+    addIssue(context, offset, String(css).slice(error.offset ?? 0, (error.offset ?? 0) + 120), `CSS could not be parsed: ${error.message}`, "Repair the CSS before rendering.", "media-css");
     return;
   }
   const references2 = [];
@@ -29220,7 +29223,7 @@ async function checkReference(context, rawReference, offset, snippet, options = 
   const reference = String(rawReference ?? "").trim();
   const role = options.role ?? "media reference";
   if (!reference) {
-    addIssue(context, offset, snippet, `${role} must not be empty.`, "Use an object-relative local asset path.");
+    addIssue(context, offset, snippet, `${role} must not be empty.`, "Use an object-relative local asset path.", "media-reference");
     return;
   }
   if (reference.startsWith("#")) return;
@@ -29230,7 +29233,8 @@ async function checkReference(context, rawReference, offset, snippet, options = 
       offset,
       reference,
       `${role} must not use a remote, absolute, file, data, blob, or other URL scheme.`,
-      "Copy the authorized asset into this object directory and reference it with a relative path."
+      "Copy the authorized asset into this object directory and reference it with a relative path.",
+      "media-reference"
     );
     return;
   }
@@ -29239,17 +29243,17 @@ async function checkReference(context, rawReference, offset, snippet, options = 
   try {
     decoded = decodeURIComponent(pathPart);
   } catch {
-    addIssue(context, offset, reference, `${role} contains invalid percent encoding.`, "Use a valid object-relative asset path.");
+    addIssue(context, offset, reference, `${role} contains invalid percent encoding.`, "Use a valid object-relative asset path.", "media-reference");
     return;
   }
   if (!decoded) {
-    addIssue(context, offset, reference, `${role} does not identify a local file.`, "Use an object-relative local asset path.");
+    addIssue(context, offset, reference, `${role} does not identify a local file.`, "Use an object-relative local asset path.", "media-reference");
     return;
   }
   const baseDirectory = options.baseDirectory ?? context.objectDirectory;
   const resolved = path2.resolve(baseDirectory, decoded);
   if (resolved === context.objectDirectory || !resolved.startsWith(`${context.objectDirectory}${path2.sep}`)) {
-    addIssue(context, offset, reference, `${role} escapes the owning object directory.`, "Place the asset inside this object directory and use a relative path.");
+    addIssue(context, offset, reference, `${role} escapes the owning object directory.`, "Place the asset inside this object directory and use a relative path.", "media-outside");
     return;
   }
   let stat2;
@@ -29257,19 +29261,19 @@ async function checkReference(context, rawReference, offset, snippet, options = 
   try {
     [stat2, realAsset] = await Promise.all([lstat(resolved), realpath(resolved)]);
   } catch (error) {
-    addIssue(context, offset, reference, `${role} does not resolve to an existing local file.`, `Add ${decoded} inside the object directory before rendering.`);
+    addIssue(context, offset, reference, `${role} does not resolve to an existing local file.`, `Add ${decoded} inside the object directory before rendering.`, "media-missing");
     return;
   }
   if (!realAsset.startsWith(`${context.realObjectDirectory}${path2.sep}`)) {
-    addIssue(context, offset, reference, `${role} resolves outside the owning object directory.`, "Replace the escaping symlink/path with an object-owned local asset.");
+    addIssue(context, offset, reference, `${role} resolves outside the owning object directory.`, "Replace the escaping symlink/path with an object-owned local asset.", "media-outside");
     return;
   }
   if (!stat2.isFile()) {
-    addIssue(context, offset, reference, `${role} must resolve to a regular file.`, "Reference a file rather than a directory or special entry.");
+    addIssue(context, offset, reference, `${role} must resolve to a regular file.`, "Reference a file rather than a directory or special entry.", "media-not-file");
     return;
   }
   if (stat2.size === 0) {
-    addIssue(context, offset, reference, `${role} resolves to an empty file.`, "Replace it with a valid nonempty asset.");
+    addIssue(context, offset, reference, `${role} resolves to an empty file.`, "Replace it with a valid nonempty asset.", "media-empty");
     return;
   }
   const relativeAsset = `./${path2.relative(context.objectDirectory, resolved).split(path2.sep).join("/")}`;
@@ -29288,7 +29292,7 @@ async function checkReference(context, rawReference, offset, snippet, options = 
 async function verifyImage(context, filename, relativeAsset, offset, reference) {
   const extension = path2.extname(filename).toLowerCase();
   if (!IMAGE_EXTENSIONS.has(extension)) {
-    addIssue(context, offset, reference, `Unsupported image format for ${relativeAsset}.`, "Use PNG, JPEG, WebP, GIF, SVG, or AVIF. PDF files cannot be embedded as images.");
+    addIssue(context, offset, reference, `Unsupported image format for ${relativeAsset}.`, "Use PNG, JPEG, WebP, GIF, SVG, or AVIF. PDF files cannot be embedded as images.", "media-format");
     return;
   }
   const bytes = await readFile(filename);
@@ -29304,7 +29308,7 @@ async function verifyImage(context, filename, relativeAsset, offset, reference) 
   }
   const expectedType = RASTER_EXTENSIONS.get(extension);
   if (!dimensions || dimensions.type !== expectedType || !Number.isFinite(dimensions.width) || !Number.isFinite(dimensions.height) || dimensions.width <= 0 || dimensions.height <= 0) {
-    addIssue(context, offset, reference, `Image bytes are corrupt or do not match the ${extension} extension.`, "Replace the file with a valid image whose format and extension agree.");
+    addIssue(context, offset, reference, `Image bytes are corrupt or do not match the ${extension} extension.`, "Replace the file with a valid image whose format and extension agree.", "media-corrupt");
   }
 }
 async function verifySvg(context, bytes, filename, offset, reference) {
@@ -29312,7 +29316,7 @@ async function verifySvg(context, bytes, filename, offset, reference) {
   const fragment = parseFragment(source, { sourceCodeLocationInfo: true });
   const root = (fragment.childNodes ?? []).find((node) => node.tagName);
   if (root?.tagName !== "svg") {
-    addIssue(context, offset, reference, "SVG asset does not contain an <svg> root element.", "Replace it with a structurally valid SVG file.");
+    addIssue(context, offset, reference, "SVG asset does not contain an <svg> root element.", "Replace it with a structurally valid SVG file.", "media-corrupt");
     return;
   }
   const attributes = new Map((root.attrs ?? []).map((attribute) => [attribute.name.toLowerCase(), attribute.value]));
@@ -29321,7 +29325,7 @@ async function verifySvg(context, bytes, filename, offset, reference) {
   const viewBox = String(attributes.get("viewbox") ?? "").trim().split(/[\s,]+/).map(Number);
   const positiveViewBox = viewBox.length === 4 && viewBox.every(Number.isFinite) && viewBox[2] > 0 && viewBox[3] > 0;
   if (!(width && height) && !positiveViewBox) {
-    addIssue(context, offset, reference, "SVG asset has no positive width/height or viewBox dimensions.", "Add positive SVG dimensions so publication layout is deterministic.");
+    addIssue(context, offset, reference, "SVG asset has no positive width/height or viewBox dimensions.", "Add positive SVG dimensions so publication layout is deterministic.", "media-svg-dimensions");
   }
   await visitHtmlNodes(context, [root], source, 0, path2.dirname(filename));
 }
@@ -29343,17 +29347,20 @@ import path3 from "node:path";
 import process from "node:process";
 var MARKER_SCHEMA = "derivon.textbook-output/v1";
 var ROUTE_SCHEMA = "derivon.textbook-route/v1";
+var REPORT_SCHEMA = "derivon.textbook-report/v1";
 var args = process.argv.slice(2);
+var json = takeFlag("--json");
+var failure = { output: null, chapters: [], references: [] };
 if (takeFlag("--help") || takeFlag("-h")) {
   console.log(`Usage:
-  node export-route-textbook.mjs <workspace> --output <directory>
+  node export-route-textbook.mjs [--json] <workspace> --output <directory>
     [--start <point>]... --target <point> [--target <point>]...
     [--max-nodes <n>] [--max-millis <n>] [--max-references <n>]
     [--allow-approximate] [--force] [--serve] [--port <n>]`);
   process.exit(0);
 }
 var workspaceRoot = path3.resolve(args.shift() ?? ".");
-var outputArg = takeValue("--output", true);
+var outputArg = takeRequiredValue("--output");
 var starts = takeValues("--start");
 var targets = takeValues("--target");
 var maxNodes = takeValue("--max-nodes") ?? "200000";
@@ -29363,16 +29370,22 @@ var allowApproximate = takeFlag("--allow-approximate");
 var force = takeFlag("--force");
 var serve = takeFlag("--serve");
 var port = Number(takeValue("--port") ?? 0);
-if (args.length) fail(`Unexpected argument: ${args[0]}`, 2);
-if (!targets.length) fail("At least one --target is required.", 2);
-if (!/^\d+$/.test(maxNodes) || !/^\d+$/.test(maxMillis)) fail("Route budgets must be non-negative integers.", 2);
-if (!/^\d+$/.test(maxReferences)) fail("--max-references must be a non-negative integer.", 2);
-if (!Number.isInteger(port) || port < 0 || port > 65535) fail("Invalid --port.", 2);
+if (args.length) fail(`Unexpected argument: ${args[0]}`, 2, "usage");
+if (!targets.length) fail("At least one --target is required.", 2, "usage");
+if (!/^\d+$/.test(maxNodes) || !/^\d+$/.test(maxMillis)) fail("Route budgets must be non-negative integers.", 2, "usage");
+if (!/^\d+$/.test(maxReferences)) fail("--max-references must be a non-negative integer.", 2, "usage");
+if (!Number.isInteger(port) || port < 0 || port > 65535) fail("Invalid --port.", 2, "usage");
 var outputRoot = path3.resolve(outputArg);
 if (outputRoot === workspaceRoot || outputRoot.startsWith(`${workspaceRoot}${path3.sep}.derivon${path3.sep}`)) {
-  fail("Output cannot replace the workspace or live under .derivon.", 2);
+  fail("Output cannot replace the workspace or live under .derivon.", 2, "usage");
 }
-var manifest = JSON.parse(await readFile2(path3.join(workspaceRoot, ".derivon", "workspace.json"), "utf8"));
+failure.output = outputRoot;
+var manifest;
+try {
+  manifest = JSON.parse(await readFile2(path3.join(workspaceRoot, ".derivon", "workspace.json"), "utf8"));
+} catch (error) {
+  fail(`Cannot read the workspace manifest: ${error.message}`, 1, error instanceof SyntaxError ? "invalid-json" : "io-error");
+}
 var graph = manifest.graph;
 var routeArgs = ["query", "route"];
 for (const id of starts) routeArgs.push("--start", id);
@@ -29383,31 +29396,38 @@ var solved = spawnSync("derivon", routeArgs, {
   encoding: "utf8",
   maxBuffer: 64 * 1024 * 1024
 });
-if (solved.error?.code === "ENOENT") fail("derivon CLI is not installed or not on PATH.");
-if (solved.status !== 0) fail((solved.stderr || solved.stdout).trim());
-var route = JSON.parse(solved.stdout);
+if (solved.error?.code === "ENOENT") fail("derivon CLI is not installed or not on PATH.", 1, "external-tool");
+if (solved.status !== 0) fail((solved.stderr || solved.stdout).trim(), 1, "graph-invalid");
+var route;
+try {
+  route = JSON.parse(solved.stdout);
+} catch (error) {
+  fail(`derivon returned no usable route: ${error.message}`, 1, "graph-invalid");
+}
 if (!route.reachable) {
   const diagnoses = (route.targetDiagnoses ?? []).map((entry) => `${entry.targetPointId}: blocking=${entry.blockingPointIds.join(",") || "none"} cycles=${entry.cycles.length}`).join("\n");
   fail(`Route is unreachable.
-${diagnoses}`);
+${diagnoses}`, 1, "route-unreachable");
 }
-if (!route.provenOptimal && !allowApproximate) fail("Route is not proven optimal. Increase the budget or pass --allow-approximate.");
+if (!route.provenOptimal && !allowApproximate) fail("Route is not proven optimal. Increase the budget or pass --allow-approximate.", 1, "route-not-optimal");
 var pointById = new Map(graph.points.map((point) => [point.id, { ...point, kind: "concept" }]));
 var edgeById = new Map(graph.hyperedges.map((edge) => [edge.id, { ...edge, kind: "derivation" }]));
 var objectById = new Map([...pointById, ...edgeById]);
 var objectByPublication = new Map([...objectById.values()].map((object) => [normalizeWorkspacePath(`${object.data.document}/document.md`), object]));
 var sequence = [];
+failure.chapters = sequence;
 var seenPoints = /* @__PURE__ */ new Set();
 for (const id of route.startPointIds) addPoint(id, "prerequisite");
 for (const edgeId of route.executableOrder) {
   const edge = edgeById.get(edgeId);
-  if (!edge) fail(`Route references unknown hyperedge ${edgeId}.`);
+  if (!edge) fail(`Route references unknown hyperedge ${edgeId}.`, 1, "graph-invalid");
   sequence.push(entryFor(edge, "derivation"));
   if (!seenPoints.has(edge.head)) addPoint(edge.head, "conclusion");
 }
 for (const id of route.pointIds) if (!seenPoints.has(id)) addPoint(id, "route-concept");
 var routeIds = new Set(sequence.map((entry) => entry.id));
 var references = [];
+failure.references = references;
 var referrers = /* @__PURE__ */ new Map();
 var sourceById = /* @__PURE__ */ new Map();
 var htmlById = /* @__PURE__ */ new Map();
@@ -29423,9 +29443,9 @@ for (let cursor = 0; cursor < queue.length; cursor += 1) {
   try {
     markdown = await readFile2(sourceIndex, "utf8");
   } catch {
-    fail(`Missing document for ${object.kind} ${object.id}: ${path3.relative(workspaceRoot, sourceIndex)}`);
+    fail(`Missing document for ${object.kind} ${object.id}: ${path3.relative(workspaceRoot, sourceIndex)}`, 1, "document-missing");
   }
-  await auditDocumentMedia({ markdown, objectId: object.id, sourcePath: `${object.data.document}/document.md`, objectDirectory: source });
+  await auditDocumentMediaOrFail({ markdown, objectId: object.id, sourcePath: `${object.data.document}/document.md`, objectDirectory: source });
   const html = renderDocument(markdown, object.data.label || object.id);
   sourceById.set(object.id, source);
   htmlById.set(object.id, html);
@@ -29487,11 +29507,23 @@ try {
   await rm(stageRoot, { recursive: true, force: true });
   throw error;
 }
-console.log(`Exported textbook: ${outputRoot}`);
+if (json) {
+  process.stdout.write(`${JSON.stringify({
+    schema: REPORT_SCHEMA,
+    output: outputRoot,
+    chapters: sequence,
+    references: references.map((entry) => ({ ...entry, referrerIds: [...referrers.get(entry.id) ?? []] })),
+    issues: []
+  }, null, 2)}
+`);
+  console.error(`Exported textbook: ${outputRoot}`);
+} else {
+  console.log(`Exported textbook: ${outputRoot}`);
+}
 if (serve) await serveDirectory(outputRoot, port);
 function addPoint(id, role) {
   const point = pointById.get(id);
-  if (!point) fail(`Route references unknown point ${id}.`);
+  if (!point) fail(`Route references unknown point ${id}.`, 1, "graph-invalid");
   seenPoints.add(id);
   sequence.push(entryFor(point, role));
 }
@@ -29507,14 +29539,14 @@ function entryFor(object, role) {
 async function prepareStage(output, overwrite) {
   try {
     await stat(output);
-    if (!overwrite) fail(`Output already exists: ${output}. Pass --force to replace a recognized textbook output.`);
+    if (!overwrite) fail(`Output already exists: ${output}. Pass --force to replace a recognized textbook output.`, 1, "output-exists");
     let marker;
     try {
       marker = JSON.parse(await readFile2(path3.join(output, ".derivon-textbook.json"), "utf8"));
     } catch {
-      fail(`Refusing to replace unrecognized output directory: ${output}`);
+      fail(`Refusing to replace unrecognized output directory: ${output}`, 1, "output-exists");
     }
-    if (marker.schema !== MARKER_SCHEMA) fail(`Refusing to replace unrecognized output directory: ${output}`);
+    if (marker.schema !== MARKER_SCHEMA) fail(`Refusing to replace unrecognized output directory: ${output}`, 1, "output-exists");
   } catch (error) {
     if (error.code !== "ENOENT") throw error;
   }
@@ -29526,18 +29558,24 @@ async function finalizeStage(stage, output) {
   await rename(stage, output);
 }
 async function safeWorkspaceDirectory(root, relative) {
-  if (typeof relative !== "string" || path3.isAbsolute(relative) || relative.includes("\\")) fail(`Unsafe document path: ${String(relative)}`);
+  if (typeof relative !== "string" || path3.isAbsolute(relative) || relative.includes("\\")) fail(`Unsafe document path: ${String(relative)}`, 1, "document-unsafe");
   const resolved = path3.resolve(root, relative);
-  if (resolved === root || !resolved.startsWith(`${root}${path3.sep}`)) fail(`Unsafe document path: ${relative}`);
-  const [realRoot, realDirectory] = await Promise.all([realpath2(root), realpath2(resolved)]);
-  if (realDirectory === realRoot || !realDirectory.startsWith(`${realRoot}${path3.sep}`)) fail(`Document path resolves outside the workspace: ${relative}`);
+  if (resolved === root || !resolved.startsWith(`${root}${path3.sep}`)) fail(`Unsafe document path: ${relative}`, 1, "document-unsafe");
+  let realRoot;
+  let realDirectory;
+  try {
+    [realRoot, realDirectory] = await Promise.all([realpath2(root), realpath2(resolved)]);
+  } catch (error) {
+    fail(`Cannot resolve document directory ${relative}: ${error.message}`, 1, error.code === "ENOENT" ? "document-missing" : "io-error");
+  }
+  if (realDirectory === realRoot || !realDirectory.startsWith(`${realRoot}${path3.sep}`)) fail(`Document path resolves outside the workspace: ${relative}`, 1, "document-unsafe");
   return realDirectory;
 }
 async function rejectSymbolicLinks(directory) {
   for (const entry of await readdir(directory, { withFileTypes: true })) {
     const current = path3.join(directory, entry.name);
     const info = await lstat2(current);
-    if (info.isSymbolicLink()) fail(`Refusing symbolic link in document directory: ${current}`);
+    if (info.isSymbolicLink()) fail(`Refusing symbolic link in document directory: ${current}`, 1, "document-unsafe");
     if (info.isDirectory()) await rejectSymbolicLinks(current);
   }
 }
@@ -29648,15 +29686,17 @@ function takeFlag(flag) {
   args.splice(index, 1);
   return true;
 }
-function takeValue(flag, required = false) {
+function takeValue(flag) {
   const index = args.indexOf(flag);
-  if (index < 0) {
-    if (required) fail(`Missing ${flag}.`, 2);
-    return null;
-  }
+  if (index < 0) return null;
   const value = args[index + 1];
-  if (!value || value.startsWith("--")) fail(`Missing value for ${flag}.`, 2);
+  if (!value || value.startsWith("--")) fail(`Missing value for ${flag}.`, 2, "usage");
   args.splice(index, 2);
+  return value;
+}
+function takeRequiredValue(flag) {
+  const value = takeValue(flag);
+  if (value === null) fail(`Missing ${flag}.`, 2, "usage");
   return value;
 }
 function takeValues(flag) {
@@ -29667,7 +29707,22 @@ function takeValues(flag) {
     values.push(value);
   }
 }
-function fail(message, code = 1) {
-  console.error(message);
+async function auditDocumentMediaOrFail(options) {
+  try {
+    await auditDocumentMedia(options);
+  } catch (error) {
+    if (Array.isArray(error?.issues)) {
+      fail(error.issues.map((entry) => `${entry.sourcePath}:${entry.line}: ${entry.message}`).join("\n"), 1, error.issues[0].code ?? "media-invalid");
+    }
+    throw error;
+  }
+}
+function fail(message, code = 1, diagnostic = "io-error") {
+  if (json) {
+    writeSync(1, `${JSON.stringify({ schema: REPORT_SCHEMA, output: failure.output, chapters: failure.chapters, references: failure.references, issues: [{ code: diagnostic, path: ".", message }] }, null, 2)}
+`);
+  } else {
+    console.error(message);
+  }
   process.exit(code);
 }

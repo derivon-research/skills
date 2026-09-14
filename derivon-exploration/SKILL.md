@@ -58,8 +58,9 @@ start point and remains distinct from the learner-known start set. Keep chapter
 adjacency, citation, chronology, similarity, and ordinary association in prose or
 a separate relation layer.
 
-Crosslink exact changed objects, render, validate, and report every graph, source
-publication, and inserted-reference change. Source-grounded content may be
+Commit through the `derivon-mindmap` command surface, then crosslink the exact
+changed objects, render, and report every graph, source publication, and
+inserted-reference change. Source-grounded content may be
 published before the learner demonstrates understanding so its documents can do
 the teaching; label every new weight provisional.
 
@@ -80,9 +81,9 @@ learner evidence; it does not require deleting source-grounded graph content or
 pretending mastery.
 
 Non-destructive verified updates need no redundant approval. Deletion or broad
-restructuring still requires an impact summary and confirmation. Crosslink,
-render, validate, and report every changed graph object, source document,
-publication, and inserted reference. If static material proves insufficient or
+restructuring still requires an impact summary and confirmation. Commit through the
+command surface, then crosslink, render, and report every changed graph object,
+source document, publication, and inserted reference. If static material proves insufficient or
 the learner requests richer content, use the Mindmap rich-document contract and
 prompt them to open each new interactive example.
 

@@ -1,9 +1,19 @@
 #!/usr/bin/env node
 
-import { access, lstat, readFile, readdir, realpath } from 'node:fs/promises';
-import { spawnSync } from 'node:child_process';
+/**
+ * Read-only audit of one workspace manifest. The reference rules live in
+ * `lib/workspace-validator.mjs`, shared with the command surface; this file is the CLI over
+ * them. Diagnostics always carry a stable code, so `--json` output is consumable as is.
+ *
+ * Usage: node validate-workspace.mjs [--json] [--manifest <candidate.json>] <workspace>
+ */
+
+import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
+import { CODE, issue } from './lib/envelope.mjs';
+import { manifestPathFor } from './lib/fs.mjs';
+import { auditWorkspace } from './lib/workspace-validator.mjs';
 
 const args = process.argv.slice(2);
 const jsonOutput = takeFlag(args, '--json');
@@ -14,194 +24,25 @@ if (takeFlag(args, '--help') || takeFlag(args, '-h')) {
 }
 const root = path.resolve(args.shift() ?? '.');
 if (args.length) failUsage(`Unexpected argument: ${args[0]}`);
-const manifestPath = manifestArg ? path.resolve(manifestArg) : path.join(root, '.derivon', 'workspace.json');
-const realRoot = await realpath(root);
-const issues = [];
-let points = [];
-let hyperedges = [];
+const manifestPath = manifestPathFor(root, manifestArg);
+
 let manifest;
 try {
   manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
 } catch (error) {
-  finish([{ path: '.derivon/workspace.json', message: error.message }]);
+  finish([issue(CODE.INVALID_JSON, '.derivon/workspace.json', error.message)], 0, 0);
 }
 
-/* The workspace identity. The rule is the workspace protocol's (derivon-mindmap README 的
- * 「工作区格式」), stated here the same way the schema string is: the validator enforces the
- * protocol, it does not own it. An id becomes a directory name under the application data
- * directory, so it is exactly one filesystem-safe path segment. Uppercase is not in the
- * alphabet, so two ids differing only in case cannot both exist and case is never folded. */
-const WORKSPACE_ID_MAX_LENGTH = 64;
-const WORKSPACE_ID_PATTERN = /^[a-z0-9](?:[a-z0-9-]*[a-z0-9])?$/;
-/* Windows refuses to create these as directory names at all. */
-const RESERVED_WORKSPACE_IDS = new Set([
-  'con', 'prn', 'aux', 'nul',
-  ...Array.from({ length: 9 }, (_, index) => `com${index + 1}`),
-  ...Array.from({ length: 9 }, (_, index) => `lpt${index + 1}`),
-]);
+const { issues, concepts, derivations } = await auditWorkspace({ root, manifest });
+finish(issues, concepts, derivations);
 
-// `derivon.workspace/v1` is the only workspace protocol; an unrecognized schema string is
-// a broken workspace.
-checkObject(manifest, '', ['schema', 'id', 'document', 'graph', 'tags'], ['schema', 'id', 'document', 'graph']);
-if (manifest.schema !== 'derivon.workspace/v1') issue('/schema', 'expected derivon.workspace/v1');
-checkWorkspaceId(manifest.id);
-checkObject(manifest.document, '/document', ['title', 'description']);
-if (typeof manifest.document?.title !== 'string') issue('/document/title', 'expected string');
-if (typeof manifest.document?.description !== 'string') issue('/document/description', 'expected string');
-checkObject(manifest.graph, '/graph', ['points', 'hyperedges']);
-points = Array.isArray(manifest.graph?.points) ? manifest.graph.points : [];
-hyperedges = Array.isArray(manifest.graph?.hyperedges) ? manifest.graph.hyperedges : [];
-if (!Array.isArray(manifest.graph?.points)) issue('/graph/points', 'expected array');
-if (!Array.isArray(manifest.graph?.hyperedges)) issue('/graph/hyperedges', 'expected array');
-checkTags(manifest.tags);
-
-const cli = spawnSync('derivon', ['validate'], {
-  input: JSON.stringify({ points, hyperedges }),
-  encoding: 'utf8',
-  maxBuffer: 64 * 1024 * 1024,
-});
-if (cli.error?.code === 'ENOENT') issue('/graph', 'derivon CLI is not installed or not on PATH');
-else if (cli.status !== 0) issue('/graph', `derivon validate failed: ${(cli.stderr || cli.stdout).trim()}`);
-
-const pointIds = new Set();
-const allIds = new Set();
-const owners = new Map();
-for (const [index, point] of points.entries()) {
-  const location = `/graph/points/${index}`;
-  checkObject(point, location, ['id', 'data']);
-  checkId(point?.id, `${location}/id`, allIds);
-  if (typeof point?.id === 'string') pointIds.add(point.id);
-  await checkDocument(point, 'concept', location);
-}
-for (const [index, edge] of hyperedges.entries()) {
-  const location = `/graph/hyperedges/${index}`;
-  checkObject(edge, location, ['id', 'weight', 'tails', 'head', 'data']);
-  checkId(edge?.id, `${location}/id`, allIds);
-  await checkDocument(edge, 'derivation', location);
+function takeFlag(values, flag) {
+  const index = values.indexOf(flag);
+  if (index < 0) return false;
+  values.splice(index, 1);
+  return true;
 }
 
-finish(issues);
-
-/** The identity a workspace cannot be read without. `checkObject` reports a missing one. */
-function checkWorkspaceId(id) {
-  if (id === undefined) return;
-  if (typeof id !== 'string') {
-    issue('/id', 'expected string');
-    return;
-  }
-  if (id.length > WORKSPACE_ID_MAX_LENGTH || !WORKSPACE_ID_PATTERN.test(id)) {
-    issue('/id', 'expected lowercase ASCII letters, digits and hyphens, starting and ending with a letter or digit, at most 64 characters');
-    return;
-  }
-  if (RESERVED_WORKSPACE_IDS.has(id)) issue('/id', `expected a directory name Windows accepts; ${id} is a reserved device name`);
-}
-
-/** Workspace-level tag declarations. */
-function checkTags(tags) {
-  if (tags === undefined) return;
-  if (!Array.isArray(tags)) {
-    issue('/tags', 'expected array');
-    return;
-  }
-  const declared = new Set();
-  for (const [index, tag] of tags.entries()) {
-    const location = `/tags/${index}`;
-    checkObject(tag, location, ['id', 'label'], ['id', 'label']);
-    if (typeof tag?.id !== 'string' || !tag.id.trim()) issue(`${location}/id`, 'expected non-empty string');
-    else if (declared.has(tag.id)) issue(`${location}/id`, `duplicate tag ID ${tag.id}`);
-    else declared.add(tag.id);
-    if (typeof tag?.label !== 'string' || !tag.label.trim()) issue(`${location}/label`, 'expected non-empty string');
-  }
-}
-
-/** Tags belong to concepts. */
-function checkConceptTags(tags, location) {
-  if (tags === undefined) return;
-  if (!Array.isArray(tags)) {
-    issue(location, 'expected array of tag IDs');
-    return;
-  }
-  const seen = new Set();
-  for (const [index, tag] of tags.entries()) {
-    if (typeof tag !== 'string' || !tag.trim()) issue(`${location}/${index}`, 'expected non-empty string');
-    else if (seen.has(tag)) issue(`${location}/${index}`, `duplicate tag ${tag}`);
-    else seen.add(tag);
-  }
-}
-
-async function checkDocument(object, kind, location) {
-  const data = object?.data;
-  const required = kind === 'concept' ? ['label', 'document'] : ['document'];
-  const fields = kind === 'concept' ? [...required, 'description', 'tags'] : [...required, 'label', 'description'];
-  checkObject(data, `${location}/data`, fields, required);
-  if (kind === 'concept') checkConceptTags(data?.tags, `${location}/data/tags`);
-  if (typeof data?.label !== 'string' && (kind === 'concept' || data?.label !== undefined)) {
-    issue(`${location}/data/label`, 'expected string');
-  }
-  if (data?.description !== undefined && typeof data.description !== 'string') {
-    issue(`${location}/data/description`, 'expected string');
-  }
-  if (!safeRelativeDirectory(data?.document)) {
-    issue(`${location}/data/document`, 'expected a safe workspace-relative directory');
-    return;
-  }
-  if (owners.has(data.document)) issue(`${location}/data/document`, `also owned by ${owners.get(data.document)}`);
-  else owners.set(data.document, object.id);
-  try {
-    const realDirectory = await realpath(path.join(root, data.document));
-    if (realDirectory === realRoot || !realDirectory.startsWith(`${realRoot}${path.sep}`)) {
-      issue(`${location}/data/document`, 'document directory resolves outside the workspace');
-      return;
-    }
-    await checkSymbolicLinks(realDirectory, location);
-  } catch {
-    issue(`${location}/data/document`, `missing directory ${data.document}`);
-    return;
-  }
-  await requireFile(`${data.document}/document.md`, location);
-}
-
-async function checkSymbolicLinks(directory, location) {
-  for (const entry of await readdir(directory, { withFileTypes: true })) {
-    const current = path.join(directory, entry.name);
-    const info = await lstat(current);
-    if (info.isSymbolicLink()) issue(location, `symbolic link is not allowed in document directory: ${path.relative(root, current)}`);
-    else if (info.isDirectory()) await checkSymbolicLinks(current, location);
-  }
-}
-
-async function requireFile(relative, location) {
-  try {
-    await access(path.join(root, relative));
-  } catch {
-    issue(location, `missing file ${relative}`);
-  }
-}
-
-function checkObject(value, location, allowed, required = allowed) {
-  if (!value || typeof value !== 'object' || Array.isArray(value)) {
-    issue(location || '/', 'expected object');
-    return;
-  }
-  for (const key of Object.keys(value)) if (!allowed.includes(key)) issue(`${location}/${escapePointer(key)}`, 'unknown field');
-  for (const key of required) if (!(key in value)) issue(`${location}/${escapePointer(key)}`, 'missing field');
-}
-
-function checkId(id, location, all) {
-  if (typeof id !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._-]{0,127}$/.test(id)) issue(location, 'invalid object ID');
-  else if (all.has(id)) issue(location, `duplicate object ID ${id}`);
-  else all.add(id);
-}
-
-function safeRelativeDirectory(value) {
-  if (typeof value !== 'string' || !value || path.isAbsolute(value) || value.includes('\\') || /\.(md|html)$/i.test(value)) return false;
-  const parts = value.split('/');
-  return parts.length >= 2 && parts[0] !== '.derivon' && parts.every((part) => part && part !== '.' && part !== '..');
-}
-
-function issue(location, message) { issues.push({ path: location || '/', message }); }
-function escapePointer(value) { return value.replaceAll('~', '~0').replaceAll('/', '~1'); }
-function takeFlag(values, flag) { const i = values.indexOf(flag); if (i < 0) return false; values.splice(i, 1); return true; }
 function takeValue(values, flag) {
   const index = values.indexOf(flag);
   if (index < 0) return null;
@@ -210,14 +51,21 @@ function takeValue(values, flag) {
   values.splice(index, 2);
   return value;
 }
-function failUsage(message) { console.error(message); process.exit(2); }
-function finish(found) {
-  const result = { valid: found.length === 0, workspace: root, issues: found };
-  if (jsonOutput) console.log(JSON.stringify(result, null, 2));
-  else if (result.valid) console.log(`Derivon workspace is valid: ${points?.length ?? 0} concept(s), ${hyperedges?.length ?? 0} derivation(s).`);
-  else {
+
+function failUsage(message) {
+  console.error(message);
+  process.exit(2);
+}
+
+function finish(found, concepts, derivations) {
+  const valid = found.length === 0;
+  if (jsonOutput) {
+    console.log(JSON.stringify({ valid, workspace: root, issues: found }, null, 2));
+  } else if (valid) {
+    console.log(`Derivon workspace is valid: ${concepts} concept(s), ${derivations} derivation(s).`);
+  } else {
     console.error(`Derivon workspace has ${found.length} error(s):`);
-    for (const entry of found) console.error(`- ${entry.path}: ${entry.message}`);
+    for (const entry of found) console.error(`- ${entry.path}: ${entry.message} [${entry.code}]`);
   }
-  process.exit(result.valid ? 0 : 1);
+  process.exit(valid ? 0 : 1);
 }
