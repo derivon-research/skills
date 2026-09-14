@@ -11,6 +11,13 @@
  * re-reads the manifest and refuses if it changed, and only then replaces the manifest by
  * temporary sibling and rename. Correctness never depends on the caller running a check first;
  * the read-only commands exist as an audit surface, not as a required step.
+ *
+ * The surface governs two artifact categories, and every command declares which one it belongs
+ * to (`artifact`) beside the capability it exercises. Learner records are the second: they are
+ * not workspace content, they live in the application data directory keyed by the workspace id,
+ * and their commands compute that path themselves rather than being told it. The write boundary
+ * and the capability vocabulary are `derivon-mindmap`'s ADR-0011
+ * (https://github.com/derivon-research/derivon-mindmap/blob/main/docs/adr/0011-change-workspace-content-through-the-script-command-surface.md).
  */
 
 import { lstat, mkdir, readFile, rm } from 'node:fs/promises';
@@ -18,7 +25,12 @@ import path from 'node:path';
 import process from 'node:process';
 import { CODE, issue } from './envelope.mjs';
 import { classifyWorkspacePath, manifestPathFor, readManifest, realWorkspaceRoot, replaceFileAtomically, sha256 } from './fs.mjs';
-import { OBJECT_ID_PATTERN, auditWorkspace, safeRelativeDirectory } from './workspace-validator.mjs';
+import { BasisError } from './basis.mjs';
+import {
+  LEARNER_RECORD_FILE_NAMES, MISSING_VERSION, applicationDataRoot, isBasis, learnerRecordFile,
+  learnerRecordPath, parseLearnerRecord,
+} from './learner-records.mjs';
+import { OBJECT_ID_PATTERN, auditWorkspace, isUsableWorkspaceId, safeRelativeDirectory } from './workspace-validator.mjs';
 import { runDerivon, runTool } from './derivon.mjs';
 
 const MANIFEST_LABEL = '.derivon/workspace.json';
@@ -26,6 +38,7 @@ const MANIFEST_LABEL = '.derivon/workspace.json';
 export const COMMANDS = [
   {
     name: 'validate',
+    artifact: 'workspace',
     capability: 'read',
     summary: 'Audit a workspace manifest, its graph and its referenced documents.',
     argv: [
@@ -38,6 +51,7 @@ export const COMMANDS = [
   },
   {
     name: 'render',
+    artifact: 'workspace',
     capability: 'read',
     summary: 'Validate Markdown and media without writing anything, optionally for selected objects.',
     argv: [
@@ -50,6 +64,7 @@ export const COMMANDS = [
   },
   {
     name: 'crosslink',
+    artifact: 'workspace',
     capability: 'write-document',
     summary: 'Add exact-label crosslinks to documents; --check reports them without writing.',
     argv: [
@@ -64,6 +79,7 @@ export const COMMANDS = [
   },
   {
     name: 'new-object-id',
+    artifact: 'workspace',
     capability: 'read',
     summary: 'Mint an object id in the same shape the application generates.',
     argv: [
@@ -76,6 +92,7 @@ export const COMMANDS = [
   },
   {
     name: 'export-textbook',
+    artifact: 'workspace',
     capability: 'read',
     summary: 'Export a solved route as a static textbook outside the workspace.',
     argv: [
@@ -95,6 +112,7 @@ export const COMMANDS = [
   },
   {
     name: 'add-concept',
+    artifact: 'workspace',
     capability: 'write-structure',
     summary: 'Add one concept and write its document first, then replace the manifest.',
     argv: [{ name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' }],
@@ -104,6 +122,7 @@ export const COMMANDS = [
   },
   {
     name: 'add-derivation',
+    artifact: 'workspace',
     capability: 'write-structure',
     summary: 'Add one derivation and write its document first, then replace the manifest.',
     argv: [{ name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' }],
@@ -113,6 +132,7 @@ export const COMMANDS = [
   },
   {
     name: 'set-metadata',
+    artifact: 'workspace',
     capability: 'write-structure',
     summary: 'Replace workspace metadata, tag declarations, or object data.',
     argv: [{ name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' }],
@@ -122,6 +142,7 @@ export const COMMANDS = [
   },
   {
     name: 'write-document',
+    artifact: 'workspace',
     capability: 'write-document',
     summary: 'Replace one object document.md with compare-and-swap on the file.',
     argv: [{ name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' }],
@@ -131,6 +152,7 @@ export const COMMANDS = [
   },
   {
     name: 'delete-object',
+    artifact: 'workspace',
     capability: 'delete',
     summary: 'Remove graph objects without deleting their document directories.',
     argv: [
@@ -144,12 +166,42 @@ export const COMMANDS = [
   },
   {
     name: 'import',
+    artifact: 'workspace',
     capability: 'import',
     summary: 'Validate a complete manifest on stdin and replace the current one atomically.',
     argv: [{ name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' }],
     stdin: { required: true, schema: 'derivon.workspace/v1', description: 'A complete workspace manifest.' },
     result: { changed: ['manifest'], fields: [{ name: 'id', description: 'Workspace id.' }, { name: 'concepts', description: 'Concept count.' }, { name: 'derivations', description: 'Derivation count.' }] },
     run: runImport,
+  },
+  {
+    name: 'read-learner-record',
+    artifact: 'learner-records',
+    capability: 'read-learner-record',
+    summary: 'Read one learner record file from the application data directory, keyed by the workspace id.',
+    argv: [
+      { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root; its manifest id keys the record.' },
+      { name: 'file', flag: '--file', kind: 'string', required: false, values: [...LEARNER_RECORD_FILE_NAMES], description: 'Which record: state (mastery) or routes. Defaults to state.' },
+      { name: 'data-dir', flag: '--data-dir', kind: 'path', required: false, description: 'Override the application data directory root; defaults to the platform application data directory.' },
+    ],
+    stdin: null,
+    result: { changed: [], fields: [{ name: 'file', description: 'The record that was read.' }, { name: 'path', description: 'The absolute path the record was read from.' }, { name: 'present', description: 'Whether the file exists; an absent record is not an error.' }, { name: 'version', description: 'The version a later write has to carry, or null when there is no file.' }, { name: 'text', description: 'The file verbatim, so a caller can rewrite it without losing anything.' }] },
+    run: runReadLearnerRecord,
+  },
+  {
+    name: 'write-learner-record',
+    artifact: 'learner-records',
+    capability: 'write-learner-record',
+    summary: 'Validate one learner record document, fill in any basis it leaves out, and replace the file atomically.',
+    argv: [
+      { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root; its manifest id keys the record and supplies the basis.' },
+      { name: 'file', flag: '--file', kind: 'string', required: false, values: [...LEARNER_RECORD_FILE_NAMES], description: 'Which record: state (mastery) or routes. Defaults to state.' },
+      { name: 'expected-version', flag: '--expected-version', kind: 'string', required: true, description: 'The version you read: a 64-character lowercase hex digest, or the word missing when there was no file.' },
+      { name: 'data-dir', flag: '--data-dir', kind: 'path', required: false, description: 'Override the application data directory root; defaults to the platform application data directory.' },
+    ],
+    stdin: { required: true, schema: 'derivon.learning/v1 (--file state) or derivon.routes/v1 (--file routes)', description: 'A complete record document. A record that omits basis has it computed from the workspace; a basis you supply is kept as supplied. A write carries no completion marker for a route.' },
+    result: { changed: ['learnerRecord'], fields: [{ name: 'file', description: 'The record that was written.' }, { name: 'path', description: 'The absolute path replaced.' }, { name: 'version', description: 'The new version, for the next write.' }] },
+    run: runWriteLearnerRecord,
   },
 ];
 
@@ -487,6 +539,161 @@ async function runImport({ argv, context, stdin }) {
       concepts: Array.isArray(manifest.graph?.points) ? manifest.graph.points.length : 0,
       derivations: Array.isArray(manifest.graph?.hyperedges) ? manifest.graph.hyperedges.length : 0,
     },
+  };
+}
+
+/* --------------------------------------------------------------------------------------- */
+/* Learner-record commands                                                                   */
+/*                                                                                           */
+/* Learner records are not workspace content. The two questions they answer — what has this   */
+/* learner reached, and which routes did they confirm — live beside each other in the          */
+/* application data directory, keyed by the workspace id, and are read and replaced            */
+/* independently. The command computes that path itself: the workspace root supplies the id,   */
+/* and the platform supplies the data directory.                                              */
+/* --------------------------------------------------------------------------------------- */
+
+/** The workspace id is the record's whole key on disk, and it becomes a directory name. */
+function learnerRecordKey(context) {
+  const id = context.manifest?.id;
+  if (typeof id !== 'string' || !isUsableWorkspaceId(id)) {
+    return { issue: issue(CODE.INVALID_ID, '/id', 'the manifest has no usable workspace id; learner records are keyed by it, and a workspace without one is a broken workspace') };
+  }
+  return { id };
+}
+
+function takeRecordFile(argv) {
+  const name = takeValue(argv, '--file') ?? 'state';
+  const file = learnerRecordFile(name);
+  if (!file) throw new UsageError('--file must be state or routes');
+  return file;
+}
+
+function takeDataRoot(argv) {
+  const explicit = takeValue(argv, '--data-dir');
+  if (explicit !== null) return { root: path.resolve(explicit) };
+  const root = applicationDataRoot();
+  return root === null
+    ? { issue: issue(CODE.IO_ERROR, '.', 'no application data directory on this platform; pass --data-dir') }
+    : { root };
+}
+
+/** The version of a record file: the SHA-256 of its bytes, or `null` when it is not there. A
+ * record an unreadable-file error hides is not a missing record, so only `ENOENT` is `null`. */
+async function recordVersion(target) {
+  try {
+    return sha256(await readFile(target));
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+}
+
+async function runReadLearnerRecord({ argv, context }) {
+  const file = takeRecordFile(argv);
+  const dataRoot = takeDataRoot(argv);
+  assertNoArguments(argv);
+  const guard = requireManifest(context);
+  if (guard) return { issues: [guard] };
+  const key = learnerRecordKey(context);
+  if (key.issue) return { issues: [key.issue] };
+  if (dataRoot.issue) return { issues: [dataRoot.issue] };
+  const target = learnerRecordPath(dataRoot.root, key.id, file.name);
+
+  let bytes;
+  try {
+    bytes = await readFile(target);
+  } catch (error) {
+    if (error.code !== 'ENOENT') return { issues: [issue(CODE.IO_ERROR, target, error.message)] };
+    /* An absent record is an absent record: this learner has assessed nothing here, which is
+     * not the same as a record that says so, and not an error. */
+    return { result: { file: file.name, path: target, present: false, version: null, text: null } };
+  }
+  const version = sha256(bytes);
+  let text;
+  try {
+    text = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+  } catch (error) {
+    return {
+      result: { file: file.name, path: target, present: true, version, text: null },
+      issues: [issue(CODE.LEARNER_RECORD_UNREADABLE, target, `not valid UTF-8: ${error.message}`)],
+    };
+  }
+  /* The record is returned either way: a broken file is reported, never silently replaced or
+   * hidden behind an empty record. */
+  const parsed = parseLearnerRecord(text, file);
+  return {
+    result: { file: file.name, path: target, present: true, version, text },
+    issues: parsed.unreadable ? [parsed.unreadable] : parsed.issues,
+  };
+}
+
+async function runWriteLearnerRecord({ argv, context, stdin }) {
+  const file = takeRecordFile(argv);
+  const expected = takeValue(argv, '--expected-version');
+  const dataRoot = takeDataRoot(argv);
+  assertNoArguments(argv);
+  if (expected === null) throw new UsageError(`--expected-version is required: the version you read, or the word ${MISSING_VERSION}`);
+  if (expected !== MISSING_VERSION && !isBasis(expected)) {
+    throw new UsageError(`--expected-version must be a 64-character lowercase hex digest or the word ${MISSING_VERSION}`);
+  }
+  const guard = requireManifest(context);
+  if (guard) return { issues: [guard] };
+  const key = learnerRecordKey(context);
+  if (key.issue) return { issues: [key.issue] };
+  if (dataRoot.issue) return { issues: [dataRoot.issue] };
+
+  if (!stdin.trim()) return { issues: [issue(CODE.INVALID_PAYLOAD, '.', 'a record document on stdin is required')] };
+  let document;
+  try {
+    document = JSON.parse(stdin);
+  } catch (error) {
+    return { issues: [issue(CODE.INVALID_JSON, '.', error.message)] };
+  }
+  if (!document || typeof document !== 'object' || Array.isArray(document)) {
+    return { issues: [issue(CODE.INVALID_PAYLOAD, '.', 'expected a JSON object')] };
+  }
+  if (document.schema !== file.schema) {
+    return { issues: [issue(CODE.LEARNER_RECORD_UNREADABLE, '/schema', `expected ${file.schema}, found ${JSON.stringify(document.schema ?? null)}`)] };
+  }
+  /* Basis is checked in both passes: a supplied one has to be a hash to start with, and every
+   * record has to have one to finish. Only a missing one is filled. */
+  const shape = file.validate(document, { requireBasis: false });
+  if (shape.length) return { issues: shape };
+  try {
+    await file.fill(document, { realRoot: context.realRoot, manifest: context.manifest });
+  } catch (error) {
+    if (error instanceof BasisError) return { issues: [issue(error.code, error.subject, error.message)] };
+    return { issues: [issue(CODE.IO_ERROR, '.', error?.message ?? String(error))] };
+  }
+  const complete = file.validate(document, { requireBasis: true });
+  if (complete.length) return { issues: complete };
+  const text = file.serialize(document);
+  const target = learnerRecordPath(dataRoot.root, key.id, file.name);
+  const expectedVersion = expected === MISSING_VERSION ? null : expected;
+
+  let current;
+  try {
+    current = await recordVersion(target);
+  } catch (error) {
+    return { issues: [issue(CODE.IO_ERROR, target, error.message)] };
+  }
+  if (current !== expectedVersion) {
+    return { issues: [issue(CODE.CONFLICT_PRECONDITION, target, 'the learner record changed since it was read; re-read it and retry')] };
+  }
+  try {
+    await replaceFileAtomically(target, text, {
+      beforeReplace: async () => {
+        if (await recordVersion(target) !== expectedVersion) {
+          throw conflictError('the learner record changed while the command ran; re-read it and retry');
+        }
+      },
+    });
+  } catch (error) {
+    return { issues: [issue(error.code === CODE.CONFLICT_PRECONDITION ? CODE.CONFLICT_PRECONDITION : CODE.IO_ERROR, target, error.message)] };
+  }
+  return {
+    changed: { learnerRecord: file.file },
+    result: { file: file.name, path: target, version: sha256(text) },
   };
 }
 
