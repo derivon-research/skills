@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import {
-  copyFile, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile,
+  chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile,
 } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -208,30 +208,39 @@ test('a refused structural commit leaves the manifest byte-identical and the new
 
 test('a concurrent manifest change refuses the whole commit by manifest hash', async (t) => {
   const root = await fixture();
+  const shims = await mkdtemp(path.join(os.tmpdir(), 'derivon-shim-'));
   t.after(() => rm(root, { recursive: true, force: true }));
+  t.after(() => rm(shims, { recursive: true, force: true }));
 
+  /* The other writer has to land between the read that loaded the command's context and the
+   * re-read that checks its precondition. Racing it on a timer only *usually* landed there, and CI
+   * lost that race (run 34878394890) — the child's whole commit can fit inside one timer period.
+   * `auditWorkspace` shells out to `derivon` in exactly that window, so a stand-in that rewrites
+   * the manifest and then succeeds puts the other writer there *by construction*: the manifest is
+   * written after the read and before the check, whatever the machine's speed. */
   const manifestPath = path.join(root, '.derivon/workspace.json');
-  let stopped = false;
-  let counter = 0;
-  const writer = (async () => {
-    while (!stopped) {
-      counter += 1;
-      const candidate = structuredClone(BASE_MANIFEST);
-      candidate.document.description = `writer ${counter}`;
-      const temporary = path.join(root, `.write-${counter}.tmp`);
-      await writeFile(temporary, `${JSON.stringify(candidate, null, 2)}\n`);
-      await rename(temporary, manifestPath);
-      await new Promise((resolve) => setTimeout(resolve, 2));
-    }
-  })();
+  const rewritten = structuredClone(BASE_MANIFEST);
+  rewritten.document.description = 'another writer';
+  const shim = path.join(shims, 'derivon');
+  await writeFile(shim, [
+    '#!/usr/bin/env node',
+    "const fs = require('node:fs');",
+    `fs.writeFileSync(${JSON.stringify(manifestPath)}, ${JSON.stringify(`${JSON.stringify(rewritten, null, 2)}\n`)});`,
+    'process.stdin.resume();',
+    'process.stdin.on("data", () => {});',
+    'process.stdin.on("end", () => process.exit(0));',
+    '',
+  ].join('\n'));
+  await chmod(shim, 0o755);
 
-  const child = spawn(process.execPath, [cli, 'add-concept', root], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(process.execPath, [cli, 'add-concept', root], {
+    stdio: ['pipe', 'pipe', 'pipe'],
+    env: { ...process.env, PATH: `${shims}${path.delimiter}${process.env.PATH}` },
+  });
   child.stdin.end(JSON.stringify({ id: 'RACE', data: { label: 'Race', document: 'docs/race' }, markdown: '# Race\n\nConcurrent.\n' }));
   let stdout = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });
   const code = await new Promise((resolve) => child.once('exit', resolve));
-  stopped = true;
-  await writer;
 
   assert.equal(code, 1);
   const output = JSON.parse(stdout);
