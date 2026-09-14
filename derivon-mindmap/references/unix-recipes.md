@@ -292,3 +292,48 @@ node "$SKILL_DIR/scripts/export-route-textbook.mjs" "$ROOT" \
 `export-textbook` writes its report into the envelope's `result` — `output`,
 `chapters`, and `references`. The preview server binds loopback; give the user the
 URL, output path, and stop command.
+
+## Read and write a learner record
+
+A learner record is not workspace content. It lives in the application data directory,
+keyed by the workspace id, and the command computes that path itself — nothing in
+`.derivon/` points at it and no workspace commit can carry it. `state.json` is
+mastery, `routes.json` is the confirmed routes; they are read and replaced
+independently.
+
+```sh
+$CMD read-learner-record "$ROOT" --file state
+$CMD read-learner-record "$ROOT" --file routes
+```
+
+A read returns `result.text` verbatim and `result.version`. `present: false` with
+`version: null` means this learner has assessed nothing here — absence is *not
+assessed yet*, which is not a record that says so — and reading creates nothing. Pass
+`--data-dir` to point at another application data directory; without it the command
+uses the platform's.
+
+Write by reading the file, changing what you mean to change, and writing it back under
+the version you read:
+
+```sh
+VERSION=$($CMD read-learner-record "$ROOT" --file state | jq -r '.result.version // "missing"')
+$CMD read-learner-record "$ROOT" --file state | jq -r '.result.text // ""' > state.json
+jq '.concepts["limit"] = {status:"complete", data:{selfReported:true}}' state.json \
+  | $CMD write-learner-record "$ROOT" --file state --expected-version "$VERSION"
+```
+
+Leave `basis` out and the command computes it from the workspace; write it and the
+command keeps it as written, because the basis is the evidence of what a judgement was
+made against and re-writing a file must never silently refresh it. A version that no
+longer matches refuses the whole call with `conflict-precondition` and changes nothing.
+
+A route record has no completion marker and no cursor: how far along a route the
+learner is comes from `state.json` at display time, never from `routes.json`. Its
+`known` is the input snapshot of that solve, not the live known set, which is derived
+from mastery. A route is only written when it was confirmed — a preview is never
+persisted — and deleting one is writing `routes.json` without it:
+
+```sh
+jq '.routes |= map(select(.id != "r-k7f3q2"))' routes.json \
+  | $CMD write-learner-record "$ROOT" --file routes --expected-version "$VERSION"
+```

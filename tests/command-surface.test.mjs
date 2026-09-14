@@ -59,20 +59,38 @@ function assertNoTemporaries(listing, where) {
 test('capabilities is the single command manifest and every declared command runs', async (t) => {
   const capabilities = JSON.parse(run(['--capabilities']).stdout);
   assert.equal(capabilities.schema, 'derivon.command-capabilities/v1');
+  /* The envelope's own name and exit codes are published here, so a client reads them from the
+   * surface instead of hard-coding a string that governs two artifact categories. */
+  assert.equal(capabilities.result.schema, 'derivon.command-result/v1');
+  assert.deepEqual(capabilities.result.exitCodes, { ok: 0, diagnostics: 1, usage: 2 });
+  const artifacts = capabilities.artifacts.map((artifact) => artifact.name);
+  assert.deepEqual(artifacts, ['workspace', 'learner-records']);
+  for (const artifact of capabilities.artifacts) assert.equal(typeof artifact.summary, 'string', artifact.name);
   const names = capabilities.commands.map((command) => command.name);
   assert.deepEqual([...names].sort(), names, 'commands are sorted');
   assert.ok(names.includes('add-concept') && names.includes('write-document') && names.includes('import'));
+  assert.ok(names.includes('read-learner-record') && names.includes('write-learner-record'));
   for (const command of capabilities.commands) {
     assert.equal(typeof command.capability, 'string', command.name);
+    assert.ok(artifacts.includes(command.artifact), command.name);
     assert.equal(typeof command.summary, 'string', command.name);
     assert.ok(Array.isArray(command.argv) && command.argv.length > 0, command.name);
     assert.ok(command.argv.some((argument) => argument.name === 'workspace' && argument.required), command.name);
     assert.ok(command.result && Array.isArray(command.result.changed), command.name);
   }
+  /* Learner records are their own capability: a learning session reads them and writes nothing,
+   * so they cannot be folded into the workspace-content `read`. */
+  const learnerRecordCapabilities = capabilities.commands
+    .filter((command) => command.artifact === 'learner-records')
+    .map((command) => command.capability)
+    .sort();
+  assert.deepEqual(learnerRecordCapabilities, ['read-learner-record', 'write-learner-record']);
 
   for (const command of capabilities.commands) {
     const root = await fixture();
+    const dataDir = await mkdtemp(path.join(os.tmpdir(), 'derivon-command-data-'));
     t.after(() => rm(root, { recursive: true, force: true }));
+    t.after(() => rm(dataDir, { recursive: true, force: true }));
     const invocations = {
       validate: [[root], undefined],
       render: [[root], undefined],
@@ -85,13 +103,16 @@ test('capabilities is the single command manifest and every declared command run
       'write-document': [[root], JSON.stringify({ object: 'A', markdown: '# Alpha\n\nRewritten.\n' })],
       'delete-object': [[root, 'h-ab'], undefined],
       import: [[root], JSON.stringify(BASE_MANIFEST)],
+      'read-learner-record': [[root, '--data-dir', dataDir], undefined],
+      'write-learner-record': [[root, '--data-dir', dataDir, '--expected-version', 'missing'], JSON.stringify({ schema: 'derivon.learning/v1', concepts: {}, derivations: {} })],
     };
     const [args, input] = invocations[command.name];
     const result = run([command.name, ...args], input);
     const output = JSON.parse(result.stdout);
-    assert.equal(output.schema, 'derivon.workspace-result/v1', command.name);
+    assert.equal(output.schema, 'derivon.command-result/v1', command.name);
     assert.equal(output.command, command.name, command.name);
     assert.equal(output.capability, command.capability, command.name);
+    assert.equal(output.artifact, command.artifact, command.name);
     assert.equal(output.status, 'ok', `${command.name}: ${output.issues.map((issue) => issue.code).join(', ')}`);
     assert.equal(result.status, 0, command.name);
   }
@@ -115,6 +136,9 @@ test('usage errors and unknown objects use their own exit codes and codes', asyn
   assert.equal(output.status, 'diagnostics');
   assert.equal(output.issues[0].code, 'unknown-object');
   assert.equal(output.changed.manifest, false);
+
+  const usage = run(['frobnicate', root]);
+  assert.equal(JSON.parse(usage.stdout).artifact, null, 'a usage error before dispatch belongs to no artifact');
 });
 
 test('add-concept writes the document first and replaces the manifest last', async (t) => {
@@ -129,7 +153,7 @@ test('add-concept writes the document first and replaces the manifest last', asy
   }));
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.deepEqual(output.changed, { manifest: true, objects: ['C'], documents: ['docs/c'] });
+  assert.deepEqual(output.changed, { manifest: true, objects: ['C'], documents: ['docs/c'], learnerRecord: null });
   assert.equal(await readFile(path.join(root, 'docs/c/document.md'), 'utf8'), '# Gamma\n\nA new concept.\n');
   const written = JSON.parse(await manifest(root));
   assert.ok(written.graph.points.some((point) => point.id === 'C'));
@@ -322,7 +346,7 @@ test('delete-object removes the graph object and never its document directory', 
   const removed = run(['delete-object', root, 'h-ab']);
   assert.equal(removed.status, 0, removed.stdout);
   const output = JSON.parse(removed.stdout);
-  assert.deepEqual(output.changed, { manifest: true, objects: ['h-ab'], documents: [] });
+  assert.deepEqual(output.changed, { manifest: true, objects: ['h-ab'], documents: [], learnerRecord: null });
   assert.deepEqual(output.result.documents, ['docs/h-ab']);
   assert.equal(await readFile(path.join(root, 'docs/h-ab/document.md'), 'utf8'), '# Alpha to Beta\n\nAlpha establishes beta.\n');
   assert.equal(JSON.parse(await manifest(root)).graph.hyperedges.length, 0);
@@ -338,7 +362,7 @@ test('write-document replaces one document and crosslink stays behind the comman
 
   const written = run(['write-document', root], JSON.stringify({ object: 'A', markdown: '# Alpha\n\nRewritten alpha.\n' }));
   assert.equal(written.status, 0, written.stdout);
-  assert.deepEqual(JSON.parse(written.stdout).changed, { manifest: false, objects: [], documents: ['docs/a'] });
+  assert.deepEqual(JSON.parse(written.stdout).changed, { manifest: false, objects: [], documents: ['docs/a'], learnerRecord: null });
   assert.equal(await readFile(path.join(root, 'docs/a/document.md'), 'utf8'), '# Alpha\n\nRewritten alpha.\n');
   assertNoTemporaries(await entries(path.join(root, 'docs/a')), 'docs/a');
 

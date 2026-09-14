@@ -1,8 +1,14 @@
 /**
  * The single result envelope every command of the script command surface returns, plus the
  * stable diagnostic codes they may carry. The envelope is the whole stdout of a command: the
- * caller gets machine-readable status, the capability that was exercised, what changed, a
- * command-specific result, and every diagnostic with a code a client can branch on.
+ * caller gets machine-readable status, the capability that was exercised, which artifact it
+ * touched, what changed, a command-specific result, and every diagnostic with a code a client
+ * can branch on.
+ *
+ * The surface governs two artifact categories — workspace content and learner records — and one
+ * envelope carries both. Naming it after either one would make the name false for the other, so
+ * it is named after what the two share: a command call. `--capabilities` publishes the same
+ * string, so a client reads the envelope's name from the surface rather than hard-coding it.
  *
  * Exit codes are part of the contract, not of the text: 0 is a clean run, 1 is a run that
  * produced diagnostics, 2 is a usage error. A diagnostic run is not a crash — the process
@@ -11,8 +17,16 @@
 
 import process from 'node:process';
 
-export const RESULT_SCHEMA = 'derivon.workspace-result/v1';
+export const RESULT_SCHEMA = 'derivon.command-result/v1';
 export const CAPABILITIES_SCHEMA = 'derivon.command-capabilities/v1';
+
+/** The two artifact categories the surface writes and reads. A learner record is not workspace
+ * content: it lives in the application data directory, keyed by the workspace id, and never
+ * enters a manifest, a commit or its revision. */
+export const ARTIFACTS = [
+  { name: 'workspace', summary: "Workspace content: the manifest, its graph objects and the documents they own. Changed only through this surface, by derivon-mindmap's ADR-0011." },
+  { name: 'learner-records', summary: 'Learner records: mastery and confirmed routes, stored outside the workspace in the application data directory, keyed by the workspace id.' },
+];
 
 export const EXIT = { OK: 0, DIAGNOSTICS: 1, USAGE: 2 };
 
@@ -47,6 +61,9 @@ export const CODE = {
   CROSSLINK_PARSE_ERROR: 'parse-error',
   CROSSLINK_MISSING: 'crosslink-missing',
   MEDIA_INVALID: 'media-invalid',
+  LEARNER_RECORD_UNREADABLE: 'learner-record-unreadable',
+  LEARNER_RECORD_INVALID: 'learner-record-invalid',
+  BASIS_UNCOMPUTABLE: 'basis-uncomputable',
 };
 
 /** One diagnostic. `path` is a workspace-relative path or JSON pointer; `.` means the workspace. */
@@ -54,14 +71,17 @@ export function issue(code, path, message) {
   return { code, path: path || '.', message: String(message) };
 }
 
-/** Build the one result envelope. */
-export function envelope({ command, capability, status, changed, result = null, issues = [] }) {
+/** Build the one result envelope. `artifact` is the category the command belongs to, so a
+ * client can gate a tool set on "may this session touch learner records" without parsing the
+ * capability's name. */
+export function envelope({ command, capability, artifact, status, changed, result = null, issues = [] }) {
   return {
     schema: RESULT_SCHEMA,
     command,
     status: status ?? (issues.length ? 'diagnostics' : 'ok'),
     capability,
-    changed: { manifest: false, objects: [], documents: [], ...changed },
+    artifact,
+    changed: { manifest: false, objects: [], documents: [], learnerRecord: null, ...changed },
     result,
     issues,
   };

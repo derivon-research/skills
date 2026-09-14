@@ -29,6 +29,23 @@ test('central document contract requires first-mention concept navigation withou
   assert.match(text, /Whole-workspace `--all` use requires a `--check` report and confirmation/i);
 });
 
+test('the learner-record boundary is stated where a reader will hit it', async () => {
+  const skill = await normalized('derivon-mindmap/SKILL.md');
+  assert.match(skill, /learner record is everything the application remembers/i);
+  assert.match(skill, /never in the workspace/i);
+  assert.match(skill, /route carries no completion marker/i);
+  assert.match(skill, /input snapshot of\s+that solve/i);
+  assert.match(skill, /absent file is `present: false` and not an error/i);
+  assert.match(skill, /conflict-precondition/);
+  assert.match(skill, /`--capabilities` is the single command list/i);
+
+  const recipes = await normalized('derivon-mindmap/references/unix-recipes.md');
+  assert.match(recipes, /a learner record is not workspace content/i);
+  assert.match(recipes, /how far along a route the\s+learner is comes from `state\.json`/i);
+  assert.match(recipes, /read-learner-record/);
+  assert.match(recipes, /write-learner-record/);
+});
+
 test('Book Import treats meaning-bearing and requested figures as source fidelity', async () => {
   const text = await normalized('derivon-book-import/SKILL.md');
   assert.match(text, /Meaning-bearing source figures are source fidelity/i);

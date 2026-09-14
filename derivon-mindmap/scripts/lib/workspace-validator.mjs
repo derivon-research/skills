@@ -26,6 +26,18 @@ const RESERVED_WORKSPACE_IDS = new Set([
 ]);
 
 /**
+ * Is this workspace id a name a directory can take? It becomes one under the application data
+ * directory, so this is the same rule the manifest validator enforces, exported once for the
+ * learner-record path instead of being written a second time there.
+ */
+export function isUsableWorkspaceId(id) {
+  return typeof id === 'string'
+    && id.length <= WORKSPACE_ID_MAX_LENGTH
+    && WORKSPACE_ID_PATTERN.test(id)
+    && !RESERVED_WORKSPACE_IDS.has(id);
+}
+
+/**
  * Audit one in-memory manifest against a workspace root. Returns coded issues and the object
  * counts. The root must be an absolute path that exists.
  */
@@ -177,8 +189,8 @@ function checkObject(value, location, allowed, required, add) {
     add(location || '/', 'expected object', CODE.SCHEMA_INVALID);
     return;
   }
-  for (const key of Object.keys(value)) if (!allowed.includes(key)) add(`${location}/${escapePointer(key)}`, 'unknown field', CODE.SCHEMA_INVALID);
-  for (const key of (required ?? allowed)) if (!(key in value)) add(`${location}/${escapePointer(key)}`, 'missing field', CODE.SCHEMA_INVALID);
+  for (const key of Object.keys(value)) if (!allowed.includes(key)) add(`${location}/${escapeJsonPointer(key)}`, 'unknown field', CODE.SCHEMA_INVALID);
+  for (const key of (required ?? allowed)) if (!(key in value)) add(`${location}/${escapeJsonPointer(key)}`, 'missing field', CODE.SCHEMA_INVALID);
 }
 
 function checkId(id, location, all, add) {
@@ -193,6 +205,8 @@ export function safeRelativeDirectory(value) {
   return parts.length >= 2 && parts[0] !== '.derivon' && parts.every((part) => part && part !== '.' && part !== '..');
 }
 
-function escapePointer(value) {
+/** A JSON pointer segment for a key that may contain `/` or `~`. Shared with the learner-record
+ * validator, so a key is reported the same way wherever it appears. */
+export function escapeJsonPointer(value) {
   return value.replaceAll('~', '~0').replaceAll('/', '~1');
 }
