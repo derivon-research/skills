@@ -53,7 +53,7 @@ export async function auditDocumentMedia({ markdown, objectId, sourcePath, objec
     if (token.type === 'image') {
       context.visibleMedia += 1;
       if (!String(token.text ?? '').trim()) {
-        addIssue(context, offset, token.raw, 'Markdown images require meaningful nonempty alt text.', 'Describe the information the figure contributes inside ![...].');
+        addIssue(context, offset, token.raw, 'Markdown images require meaningful nonempty alt text.', 'Describe the information the figure contributes inside ![...].', 'media-alt');
       }
       context.pending ??= [];
       context.pending.push(checkReference(context, token.href, offset, token.raw, { image: true, role: 'Markdown image' }));
@@ -72,6 +72,7 @@ export async function auditDocumentMedia({ markdown, objectId, sourcePath, objec
         comment.snippet,
         'Figure metadata has no visible image or media element.',
         'Add the real local figure with Markdown image syntax, or report the figure as blocked instead of inserting a placeholder.',
+        'media-placeholder',
       );
     }
   }
@@ -88,9 +89,10 @@ function locateToken(markdown, raw, after) {
   return offset >= 0 ? offset : markdown.indexOf(raw);
 }
 
-function addIssue(context, offset, snippet, message, repair) {
+function addIssue(context, offset, snippet, message, repair, code = 'media-invalid') {
   const normalizedSnippet = String(snippet ?? '').trim().replace(/\s+/g, ' ').slice(0, 180) || '(empty reference)';
   context.issues.push({
+    code,
     objectId: context.objectId,
     sourcePath: context.sourcePath,
     line: lineAt(context.markdown, offset),
@@ -114,7 +116,7 @@ async function auditHtml(context, html, baseOffset, baseDirectory) {
   try {
     fragment = parseFragment(html, { sourceCodeLocationInfo: true });
   } catch (error) {
-    addIssue(context, baseOffset, html, `Raw HTML could not be parsed: ${error.message}`, 'Repair the HTML before rendering.');
+    addIssue(context, baseOffset, html, `Raw HTML could not be parsed: ${error.message}`, 'Repair the HTML before rendering.', 'media-html');
     return;
   }
   await visitHtmlNodes(context, fragment.childNodes ?? [], html, baseOffset, baseDirectory);
@@ -141,14 +143,14 @@ async function visitHtmlNodes(context, nodes, html, baseOffset, baseDirectory) {
     const snippet = location ? html.slice(location.startOffset, location.endOffset).slice(0, 180) : `<${tag}>`;
 
     if (tag === 'base') {
-      addIssue(context, nodeOffset, snippet, 'Raw HTML must not change the publication base URL.', 'Remove <base>; keep every dependency object-relative.');
+      addIssue(context, nodeOffset, snippet, 'Raw HTML must not change the publication base URL.', 'Remove <base>; keep every dependency object-relative.', 'media-base-url');
     } else if (tag === 'img') {
       context.visibleMedia += 1;
       if (!String(attributes.get('alt') ?? '').trim()) {
-        addIssue(context, nodeOffset, snippet, 'HTML images require meaningful nonempty alt text.', 'Add an alt attribute that describes the figure information.');
+        addIssue(context, nodeOffset, snippet, 'HTML images require meaningful nonempty alt text.', 'Add an alt attribute that describes the figure information.', 'media-alt');
       }
       if (!attributes.has('src') && !attributes.has('srcset')) {
-        addIssue(context, nodeOffset, snippet, 'HTML images require a src or srcset reference.', 'Reference an object-owned local image.');
+        addIssue(context, nodeOffset, snippet, 'HTML images require a src or srcset reference.', 'Reference an object-owned local image.', 'media-img-source');
       }
       await auditAttribute(context, attributes, 'src', attributeOffset('src'), snippet, baseDirectory, { image: true, role: '<img src>' });
       await auditSrcset(context, attributes.get('srcset'), attributeOffset('srcset'), snippet, baseDirectory, '<img srcset>');
@@ -170,7 +172,7 @@ async function visitHtmlNodes(context, nodes, html, baseOffset, baseDirectory) {
     } else if (tag === 'input' && String(attributes.get('type') ?? '').toLowerCase() === 'image') {
       context.visibleMedia += 1;
       if (!String(attributes.get('alt') ?? '').trim()) {
-        addIssue(context, nodeOffset, snippet, 'Image inputs require meaningful nonempty alt text.', 'Add an alt attribute that names the image action.');
+        addIssue(context, nodeOffset, snippet, 'Image inputs require meaningful nonempty alt text.', 'Add an alt attribute that names the image action.', 'media-alt');
       }
       await auditAttribute(context, attributes, 'src', attributeOffset('src'), snippet, baseDirectory, { image: true, role: '<input type="image">' });
     } else if (tag === 'svg') {
@@ -180,7 +182,7 @@ async function visitHtmlNodes(context, nodes, html, baseOffset, baseDirectory) {
       if (!String(attributes.get('aria-label') ?? '').trim()
         && !String(attributes.get('aria-labelledby') ?? '').trim()
         && !titleText) {
-        addIssue(context, nodeOffset, snippet, 'Inline SVG figures require an accessible title or ARIA label.', 'Add a nonempty <title>, aria-label, or aria-labelledby value.');
+        addIssue(context, nodeOffset, snippet, 'Inline SVG figures require an accessible title or ARIA label.', 'Add a nonempty <title>, aria-label, or aria-labelledby value.', 'media-svg-accessibility');
       }
     } else if (tag === 'canvas') {
       context.visibleMedia += 1;
@@ -224,11 +226,11 @@ async function auditSrcset(context, value, offset, snippet, baseDirectory, role)
   try {
     candidates = parseSrcset(value, { strict: true });
   } catch (error) {
-    addIssue(context, offset, snippet, `${role} is invalid: ${error.message}`, 'Use a valid srcset with local object-relative image paths.');
+    addIssue(context, offset, snippet, `${role} is invalid: ${error.message}`, 'Use a valid srcset with local object-relative image paths.', 'media-srcset');
     return;
   }
   if (!candidates.length) {
-    addIssue(context, offset, snippet, `${role} must not be empty.`, 'Add at least one local object-relative image candidate.');
+    addIssue(context, offset, snippet, `${role} must not be empty.`, 'Add at least one local object-relative image candidate.', 'media-srcset');
     return;
   }
   await Promise.all(candidates.map((candidate) => checkReference(context, candidate.url, offset, snippet, {
@@ -245,7 +247,7 @@ async function auditCss(context, css, baseOffset, baseDirectory, parseContext) {
     ast = parseCss(css, { context: parseContext, positions: true });
   } catch (error) {
     const offset = baseOffset + (error.offset ?? 0);
-    addIssue(context, offset, String(css).slice(error.offset ?? 0, (error.offset ?? 0) + 120), `CSS could not be parsed: ${error.message}`, 'Repair the CSS before rendering.');
+    addIssue(context, offset, String(css).slice(error.offset ?? 0, (error.offset ?? 0) + 120), `CSS could not be parsed: ${error.message}`, 'Repair the CSS before rendering.', 'media-css');
     return;
   }
   const references = [];
@@ -274,7 +276,7 @@ async function checkReference(context, rawReference, offset, snippet, options = 
   const reference = String(rawReference ?? '').trim();
   const role = options.role ?? 'media reference';
   if (!reference) {
-    addIssue(context, offset, snippet, `${role} must not be empty.`, 'Use an object-relative local asset path.');
+    addIssue(context, offset, snippet, `${role} must not be empty.`, 'Use an object-relative local asset path.', 'media-reference');
     return;
   }
   if (reference.startsWith('#')) return;
@@ -285,6 +287,7 @@ async function checkReference(context, rawReference, offset, snippet, options = 
       reference,
       `${role} must not use a remote, absolute, file, data, blob, or other URL scheme.`,
       'Copy the authorized asset into this object directory and reference it with a relative path.',
+      'media-reference',
     );
     return;
   }
@@ -294,18 +297,18 @@ async function checkReference(context, rawReference, offset, snippet, options = 
   try {
     decoded = decodeURIComponent(pathPart);
   } catch {
-    addIssue(context, offset, reference, `${role} contains invalid percent encoding.`, 'Use a valid object-relative asset path.');
+    addIssue(context, offset, reference, `${role} contains invalid percent encoding.`, 'Use a valid object-relative asset path.', 'media-reference');
     return;
   }
   if (!decoded) {
-    addIssue(context, offset, reference, `${role} does not identify a local file.`, 'Use an object-relative local asset path.');
+    addIssue(context, offset, reference, `${role} does not identify a local file.`, 'Use an object-relative local asset path.', 'media-reference');
     return;
   }
 
   const baseDirectory = options.baseDirectory ?? context.objectDirectory;
   const resolved = path.resolve(baseDirectory, decoded);
   if (resolved === context.objectDirectory || !resolved.startsWith(`${context.objectDirectory}${path.sep}`)) {
-    addIssue(context, offset, reference, `${role} escapes the owning object directory.`, 'Place the asset inside this object directory and use a relative path.');
+    addIssue(context, offset, reference, `${role} escapes the owning object directory.`, 'Place the asset inside this object directory and use a relative path.', 'media-outside');
     return;
   }
 
@@ -314,19 +317,19 @@ async function checkReference(context, rawReference, offset, snippet, options = 
   try {
     [stat, realAsset] = await Promise.all([lstat(resolved), realpath(resolved)]);
   } catch (error) {
-    addIssue(context, offset, reference, `${role} does not resolve to an existing local file.`, `Add ${decoded} inside the object directory before rendering.`);
+    addIssue(context, offset, reference, `${role} does not resolve to an existing local file.`, `Add ${decoded} inside the object directory before rendering.`, 'media-missing');
     return;
   }
   if (!realAsset.startsWith(`${context.realObjectDirectory}${path.sep}`)) {
-    addIssue(context, offset, reference, `${role} resolves outside the owning object directory.`, 'Replace the escaping symlink/path with an object-owned local asset.');
+    addIssue(context, offset, reference, `${role} resolves outside the owning object directory.`, 'Replace the escaping symlink/path with an object-owned local asset.', 'media-outside');
     return;
   }
   if (!stat.isFile()) {
-    addIssue(context, offset, reference, `${role} must resolve to a regular file.`, 'Reference a file rather than a directory or special entry.');
+    addIssue(context, offset, reference, `${role} must resolve to a regular file.`, 'Reference a file rather than a directory or special entry.', 'media-not-file');
     return;
   }
   if (stat.size === 0) {
-    addIssue(context, offset, reference, `${role} resolves to an empty file.`, 'Replace it with a valid nonempty asset.');
+    addIssue(context, offset, reference, `${role} resolves to an empty file.`, 'Replace it with a valid nonempty asset.', 'media-empty');
     return;
   }
 
@@ -347,7 +350,7 @@ async function checkReference(context, rawReference, offset, snippet, options = 
 async function verifyImage(context, filename, relativeAsset, offset, reference) {
   const extension = path.extname(filename).toLowerCase();
   if (!IMAGE_EXTENSIONS.has(extension)) {
-    addIssue(context, offset, reference, `Unsupported image format for ${relativeAsset}.`, 'Use PNG, JPEG, WebP, GIF, SVG, or AVIF. PDF files cannot be embedded as images.');
+    addIssue(context, offset, reference, `Unsupported image format for ${relativeAsset}.`, 'Use PNG, JPEG, WebP, GIF, SVG, or AVIF. PDF files cannot be embedded as images.', 'media-format');
     return;
   }
   const bytes = await readFile(filename);
@@ -364,7 +367,7 @@ async function verifyImage(context, filename, relativeAsset, offset, reference) 
   const expectedType = RASTER_EXTENSIONS.get(extension);
   if (!dimensions || dimensions.type !== expectedType || !Number.isFinite(dimensions.width) || !Number.isFinite(dimensions.height)
     || dimensions.width <= 0 || dimensions.height <= 0) {
-    addIssue(context, offset, reference, `Image bytes are corrupt or do not match the ${extension} extension.`, 'Replace the file with a valid image whose format and extension agree.');
+    addIssue(context, offset, reference, `Image bytes are corrupt or do not match the ${extension} extension.`, 'Replace the file with a valid image whose format and extension agree.', 'media-corrupt');
   }
 }
 
@@ -373,7 +376,7 @@ async function verifySvg(context, bytes, filename, offset, reference) {
   const fragment = parseFragment(source, { sourceCodeLocationInfo: true });
   const root = (fragment.childNodes ?? []).find((node) => node.tagName);
   if (root?.tagName !== 'svg') {
-    addIssue(context, offset, reference, 'SVG asset does not contain an <svg> root element.', 'Replace it with a structurally valid SVG file.');
+    addIssue(context, offset, reference, 'SVG asset does not contain an <svg> root element.', 'Replace it with a structurally valid SVG file.', 'media-corrupt');
     return;
   }
   const attributes = new Map((root.attrs ?? []).map((attribute) => [attribute.name.toLowerCase(), attribute.value]));
@@ -382,7 +385,7 @@ async function verifySvg(context, bytes, filename, offset, reference) {
   const viewBox = String(attributes.get('viewbox') ?? '').trim().split(/[\s,]+/).map(Number);
   const positiveViewBox = viewBox.length === 4 && viewBox.every(Number.isFinite) && viewBox[2] > 0 && viewBox[3] > 0;
   if (!(width && height) && !positiveViewBox) {
-    addIssue(context, offset, reference, 'SVG asset has no positive width/height or viewBox dimensions.', 'Add positive SVG dimensions so publication layout is deterministic.');
+    addIssue(context, offset, reference, 'SVG asset has no positive width/height or viewBox dimensions.', 'Add positive SVG dimensions so publication layout is deterministic.', 'media-svg-dimensions');
   }
   await visitHtmlNodes(context, [root], source, 0, path.dirname(filename));
 }

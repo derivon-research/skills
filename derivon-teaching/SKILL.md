@@ -53,7 +53,7 @@ direction; preserve prior rounds rather than overwriting their evidence.
 
 If the graph object or document basis changes, reconcile fingerprints and treat
 stale evidence as historical until the learner is verified again. Never copy
-assessment status into point/hyperedge data, starts, replacements, or object
+assessment status into point/hyperedge data, starts, or object
 documents.
 
 ## Finish

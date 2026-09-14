@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { copyFile, mkdtemp, mkdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { copyFile, mkdtemp, mkdir, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
@@ -408,22 +408,23 @@ test('renderer audits nested CSS and SVG dependencies without partial publicatio
   assert.match(svgFailure.stderr, /SVG href.*must not use a remote, absolute/);
 });
 
-test('canonical jq and derivon pipeline atomically reinserts a graph mutation', async (t) => {
+test('the command surface replaces a graph mutation atomically without staging inside .derivon', async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
-  const shell = `set -eu
-manifest="$1/.derivon/workspace.json"
-graph_tmp="$(mktemp "$1/.derivon/graph.XXXXXX")"
-manifest_tmp="$(mktemp "$1/.derivon/workspace.XXXXXX")"
-trap 'rm -f "$graph_tmp" "$manifest_tmp"' EXIT
-jq '.graph' "$manifest" | derivon hyperedge set weight h-main 2.5 > "$graph_tmp"
-jq --slurpfile graph "$graph_tmp" '.graph = $graph[0]' "$manifest" > "$manifest_tmp"
-node "$2" --manifest "$manifest_tmp" "$1" >/dev/null
-mv "$manifest_tmp" "$manifest"
-`;
-  const result = spawnSync('/bin/sh', ['-c', shell, 'pipeline', root, validator], { encoding: 'utf8' });
-  assert.equal(result.status, 0, result.stderr);
-  const manifest = JSON.parse(await readFile(path.join(root, '.derivon/workspace.json'), 'utf8'));
+  const surface = path.join(repo, 'derivon-mindmap/scripts/derivon-workspace.mjs');
+  const manifestPath = path.join(root, '.derivon/workspace.json');
+
+  const candidate = spawnSync('jq', ['.graph.hyperedges[0].weight = 2.5'], {
+    input: await readFile(manifestPath, 'utf8'),
+    encoding: 'utf8',
+  });
+  assert.equal(candidate.status, 0, candidate.stderr);
+  const imported = run(surface, ['import', root], { input: candidate.stdout });
+  assert.equal(imported.status, 0, imported.stdout + imported.stderr);
+  assert.equal(JSON.parse(imported.stdout).status, 'ok');
+
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
   assert.equal(manifest.graph.hyperedges[0].weight, 2.5);
   assert.deepEqual(manifest.tags, [{ id: 'starting', label: 'Starting points' }]);
+  assert.equal((await readdir(path.join(root, '.derivon'))).filter((name) => name.includes('.derivon-part-')).length, 0);
 });

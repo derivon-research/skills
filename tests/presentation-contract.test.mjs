@@ -25,8 +25,8 @@ test('central document contract requires first-mention concept navigation withou
   assert.match(text, /first meaningful prose mention/i);
   assert.match(text, /standard relative link/i);
   assert.match(text, /reading navigation only, not a prerequisite, derivation/i);
-  assert.match(text, /crosslink-documents\.mjs --write/i);
-  assert.match(text, /Whole-workspace `--all` use requires a check report and confirmation/i);
+  assert.match(text, /derivon-workspace\.mjs crosslink/i);
+  assert.match(text, /Whole-workspace `--all` use requires a `--check` report and confirmation/i);
 });
 
 test('Book Import treats meaning-bearing and requested figures as source fidelity', async () => {
@@ -37,5 +37,5 @@ test('Book Import treats meaning-bearing and requested figures as source fidelit
   assert.match(text, /HTML comment, TODO, empty element.*is not a figure/i);
   assert.match(text, /report that object as blocked/i);
   assert.match(text, /Do not create a persistent figure inventory/i);
-  assert.match(text, /Crosslink exact changed objects against the candidate manifest/i);
+  assert.match(text, /Commit through the `derivon-mindmap` command surface/i);
 });
