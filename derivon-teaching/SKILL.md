@@ -1,13 +1,14 @@
 ---
 name: derivon-teaching
-description: Assess a learner's understanding of target concepts through graph-grounded, non-leading grilling rounds. Use for quizzes, oral examinations, mastery checks, misconception diagnosis, prerequisite probing, or teaching assessment over an existing Derivon Mindmap. Keeps the graph and documents read-only while persisting learner assessment evidence between sessions.
+description: Assess a learner's understanding of target concepts through graph-grounded, non-leading grilling rounds. Use for quizzes, oral examinations, mastery checks, misconception diagnosis, prerequisite probing, or teaching assessment over an existing Derivon Mindmap. Keeps the graph and documents read-only while persisting assessment evidence as learner-record judgements between sessions.
 ---
 
 # Derivon Teaching
 
 Use `derivon-cli` and `derivon-mindmap` with this skill. Keep the graph,
-manifest, and object documents read-only. Persist only learner assessment state
-through [the assessment-state protocol](references/assessment-state.md).
+manifest, and object documents read-only: assessment changes no workspace file.
+Persist judgements through [the assessment-record contract](references/assessment-records.md),
+which writes the learner record the application already reads.
 
 Map the assessment as a diagnostic tree. Graph prerequisites shape candidate
 branches, but learner answers decide which branches remain open.
@@ -17,11 +18,13 @@ branches, but learner answers decide which branches remain open.
 1. Read the target concept documents, relevant derivation documents, and their
    tails. Do not grade facts the graph does not contain; report coverage gaps.
 2. Ask for target concepts and content the learner believes they know.
-3. Load and reconcile the workspace's single local Teaching state. Treat prior
-   statuses as diagnostic evidence, not facts; sample route-critical claimed
-   starts.
-4. Start one active assessment for the target set. Close or explicitly continue an
-   existing active assessment before changing targets.
+3. Read the learner record with `read-learner-record`: mastery records are this
+   learner's current status, and each record's `data` says who made the judgement
+   and on what evidence. Treat prior statuses as diagnostic evidence, not facts;
+   sample route-critical claimed starts. An absent record means nothing has been
+   assessed here, which is not the same as a record that says so.
+4. Fix the target set for this session. There is no persisted active assessment:
+   the target set, the frontier and the round history are session state.
 5. Begin with target-level discrimination, application, transfer, case, or
    scenario work. Do not begin with verbatim definitions.
 
@@ -43,24 +46,28 @@ After the response:
 - explain the exact gap without treating unfamiliar wording as failure;
 - retry with a different task type when needed;
 - recompute the diagnostic frontier and relevant route;
-- record the complete evaluated round atomically with its basis object IDs and
-  expected state revision.
+- record the whole evaluated round as **one** `write-learner-record` call under
+  the version you read, mapping each verdict to the record's one status axis and
+  leaving `basis` for the command to compute.
 
 A reply such as "I understand" or a copied definition is not mastery evidence.
 At least one task must require use, comparison, prediction, boundary analysis, or
 transfer beyond text just supplied by the Agent. Current status may move in either
-direction; preserve prior rounds rather than overwriting their evidence.
+direction; a later judgement replaces an earlier one, and the learner's own claims
+are theirs, not yours to overwrite with anything but a judgement.
 
-If the graph object or document basis changes, reconcile fingerprints and treat
-stale evidence as historical until the learner is verified again. Never copy
-assessment status into point/hyperedge data, starts, or object
-documents.
+A judgement whose `basis` no longer matches the object's current content is stale.
+The application derives that; never re-decide it here, never delete the record, and
+treat stale evidence as historical until the learner is verified again.
+
+Never copy assessment status into point/hyperedge data, starts, object documents,
+or any other file in the workspace.
 
 ## Finish
 
 Stop when the targets are demonstrated, the learner stops, or graph/source
-coverage prevents a defensible judgment. Record the final complete round, close
-the active assessment when appropriate, and return:
+coverage prevents a defensible judgment. Record the final round's judgements,
+report the round as complete, and return:
 
 - demonstrated concepts and evidence;
 - partial concepts and exact gaps;
@@ -68,7 +75,7 @@ the active assessment when appropriate, and return:
 - stale evidence that needs revalidation;
 - graph coverage limitations;
 - recommended next route or review tasks;
-- the assessment state path and its privacy/version-control boundary.
+- the learner-record path and its privacy/version-control boundary.
 
-Do not modify `.gitignore`, commit Teaching state, delete history, or reset the
-state file without explicit authorization.
+Do not modify `.gitignore`, commit a learner record, delete history, or reset the
+record without explicit authorization.
