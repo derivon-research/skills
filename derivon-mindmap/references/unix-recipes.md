@@ -1,5 +1,10 @@
 # Unix Workspace Recipes
 
+This is the shell environment's spelling of the command surface. Inside the Derivon
+Mindmap application the same commands are tools, the workspace is fixed by the
+session, and none of this is needed; these recipes are for a shell with no client
+running.
+
 These recipes require a POSIX shell, `jq`, `derivon`, Node.js, and an absolute
 installed skill path:
 
