@@ -38,7 +38,7 @@ function run(args) {
   return spawnSync(process.execPath, [crosslink, ...args], { encoding: 'utf8' });
 }
 
-test('crosslink check and write preserve Markdown while linking first exact prose mentions', async (t) => {
+test('crosslink suggests first exact prose mentions and writes only the ones applied', async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
   const sourcePath = path.join(root, 'docs/concept-topic/document.md');
@@ -46,13 +46,18 @@ test('crosslink check and write preserve Markdown while linking first exact pros
   await writeFile(sourcePath, source);
 
   const checked = run(['--json', root, 'topic']);
-  assert.equal(checked.status, 1, checked.stderr);
+  assert.equal(checked.status, 0, 'optional suggestions alone do not fail a check');
   const report = JSON.parse(checked.stdout);
-  assert.equal(report.insertionCount, 4);
-  assert.deepEqual(report.insertions.map((entry) => entry.targetId).sort(), ['cn', 'loop', 'skill', 'tool']);
+  assert.deepEqual(report.suggestions.map((entry) => entry.id).sort(), ['topic:cn', 'topic:loop', 'topic:skill', 'topic:tool']);
+  assert.ok(report.suggestions.every((entry) => !entry.written));
+  assert.equal(report.suggestions.find((entry) => entry.id === 'topic:cn').context, 'yer and [工具调用]. Skills');
   assert.equal(await readFile(sourcePath, 'utf8'), source);
 
-  const written = run(['--write', root, 'topic']);
+  const unselected = run(['--write', root, 'topic']);
+  assert.equal(unselected.status, 0, unselected.stderr);
+  assert.equal(await readFile(sourcePath, 'utf8'), source, 'nothing is written without --apply');
+
+  const written = run(['--write', '--apply', 'topic:loop', '--apply', 'topic:tool,topic:cn', '--apply', 'topic:skill', root, 'topic']);
   assert.equal(written.status, 0, written.stderr);
   const output = await readFile(sourcePath, 'utf8');
   assert.match(output, /\[\*\*Agent\*\* Loop\]\(\.\.\/concept-agent-loop\/document\.md\)/);
@@ -62,21 +67,45 @@ test('crosslink check and write preserve Markdown while linking first exact pros
   assert.match(output, /- Agent Loop repeats/);
   assert.match(output, /`Agent Loop` and \$Tool Layer\$/);
   assert.match(output, /<div>Agent Loop<\/div>/);
-  assert.equal(run([root, 'topic']).status, 0);
+  assert.equal(JSON.parse(run(['--json', root, 'topic']).stdout).suggestions.length, 0);
 });
 
-test('crosslink write is blocked atomically by a conflicting first link', async (t) => {
+test('crosslink refuses an --apply id that is not a pending suggestion', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await writeFile(path.join(root, 'docs/concept-topic/document.md'), '# Topic\n\nSkill.\n');
+  const result = run(['--write', '--json', '--apply', 'topic:loop', root, 'topic']);
+  assert.equal(result.status, 1);
+  assert.deepEqual(JSON.parse(result.stdout).issues.map((entry) => entry.code), ['unknown-suggestion']);
+  assert.equal(await readFile(path.join(root, 'docs/concept-topic/document.md'), 'utf8'), '# Topic\n\nSkill.\n');
+});
+
+test('crosslink keeps an author link to another target and still writes the rest of the batch', async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
   const topicPath = path.join(root, 'docs/concept-topic/document.md');
   const toolPath = path.join(root, 'docs/nested/concept tool/document.md');
   await writeFile(topicPath, '# Topic\n\nAgent Loop is useful.\n');
-  await writeFile(toolPath, '# Tool Layer\n\n[Agent Loop](https://example.com/wrong) is external.\n');
-  const before = await readFile(topicPath, 'utf8');
-  const result = run(['--write', root, 'topic', 'tool']);
-  assert.equal(result.status, 1);
-  assert.match(result.stderr, /conflicting-link/);
-  assert.equal(await readFile(topicPath, 'utf8'), before);
+  const toolSource = '# Tool Layer\n\n[Agent Loop](https://example.com/wrong) is external. Agent Loop again, and Skill.\n';
+  await writeFile(toolPath, toolSource);
+  const result = run(['--write', '--json', '--apply', 'topic:loop', '--apply', 'tool:skill', root, 'topic', 'tool']);
+  assert.equal(result.status, 0, result.stderr);
+  const report = JSON.parse(result.stdout);
+  assert.deepEqual(report.notices.map((entry) => entry.code), ['kept-author-link']);
+  assert.ok(!report.suggestions.some((entry) => entry.id === 'tool:loop'), 'the kept label is not suggested again');
+  assert.match(await readFile(topicPath, 'utf8'), /\[Agent Loop\]\(\.\.\/concept-agent-loop\/document\.md\)/);
+  const tool = await readFile(toolPath, 'utf8');
+  assert.match(tool, /\[Agent Loop\]\(https:\/\/example\.com\/wrong\) is external\. Agent Loop again, and \[Skill\]/);
+});
+
+test('crosslink lets an object own label occupy its span in its own document', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const loopPath = path.join(root, 'docs/concept-agent-loop/document.md');
+  await writeFile(loopPath, '# Agent Loop\n\nAn Agent Loop repeats. A lone Agent calls it.\n');
+  const result = run(['--write', '--apply', 'loop:agent', root, 'loop']);
+  assert.equal(result.status, 0, result.stderr);
+  assert.match(await readFile(loopPath, 'utf8'), /An Agent Loop repeats\. A lone \[Agent\]\(\.\.\/concept-agent\/document\.md\) calls it\./);
 });
 
 test('crosslink detects encountered duplicate labels but ignores unused duplicates', async (t) => {
@@ -122,7 +151,25 @@ test('crosslink supports candidate manifests and requires explicit scope', async
   const candidate = path.join(root, '.derivon/candidate.json');
   await writeFile(candidate, `${JSON.stringify(manifest, null, 2)}\n`);
   await writeFile(path.join(root, 'docs/concept-topic/document.md'), '# Topic\n\nNew Concept appears.\n');
-  const result = run(['--write', '--manifest', candidate, root, 'topic']);
+  const result = run(['--write', '--apply', 'topic:new', '--manifest', candidate, root, 'topic']);
   assert.equal(result.status, 0, result.stderr);
   assert.match(await readFile(path.join(root, 'docs/concept-topic/document.md'), 'utf8'), /\[New Concept\]\(\.\.\/new\/document\.md\)/);
+});
+
+test('the link audit reports links to missing workspace files and nothing about derivation endpoints', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const manifestPath = path.join(root, '.derivon/workspace.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.graph.hyperedges.push({ id: 'h-loop', weight: 1, tails: ['agent', 'tool'], head: 'loop', data: { document: 'docs/h-loop' } });
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  await mkdir(path.join(root, 'docs/h-loop'));
+  await writeFile(path.join(root, 'docs/h-loop/document.md'), '# Why\n\nBy [the agent](../concept-agent/document.md), see [gone](../concept-gone/document.md), [web](https://example.com), [here](#why) and [figure](./figure.png).\n');
+  const result = run(['--audit-links', '--json', root]);
+  assert.equal(result.status, 1);
+  const issues = JSON.parse(result.stdout).issues;
+  assert.deepEqual(issues.map((entry) => `${entry.code}:${entry.objectId}`), ['dangling-link:h-loop', 'dangling-link:h-loop']);
+  assert.ok(issues.some((entry) => /concept-gone/.test(entry.message)));
+  await writeFile(path.join(root, 'docs/h-loop/figure.png'), 'png');
+  assert.equal(JSON.parse(run(['--audit-links', '--json', root]).stdout).issues.filter((entry) => entry.code === 'dangling-link').length, 1);
 });

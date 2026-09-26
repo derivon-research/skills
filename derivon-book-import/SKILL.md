@@ -42,8 +42,8 @@ continue from, then inspect source citations and existing graph content.
    rich-media pass.
 8. Commit through the `derivon-mindmap` command surface, which validates the graph
    and the workspace references in the same call that writes the documents first
-   and replaces the manifest last. Crosslink the exact changed objects, render
-   Markdown, and report every graph, source-document, publication, and
+   and replaces the manifest last. Link the changed documents as the
+   `derivon-mindmap` object-document contract says, render Markdown, and report every graph, source-document, publication, and
    inserted-reference change for this chapter.
 9. Continue automatically. Pause only when evidence cannot settle a semantic
    ambiguity or when a destructive revision of prior work needs confirmation.

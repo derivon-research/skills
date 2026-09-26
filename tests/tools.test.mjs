@@ -208,6 +208,12 @@ test('exporter follows executable order, preserves assets, and protects output',
     await readFile(path.join(root, 'docs/h-main/diagram.png')),
   );
   assert.match(await readFile(path.join(output, 'objects/h-main/index.html'), 'utf8'), /Textbook navigation/);
+  assert.match(
+    await readFile(path.join(output, 'objects/h-main/index.html'), 'utf8'),
+    /<p class="derivon-endpoints"[^>]*><a href="\.\.\/A\/index\.html">A<\/a><span class="derivon-plus"> \+ <\/span><a href="\.\.\/B\/index\.html">B<\/a><span class="derivon-arrow"> → <\/span><a href="\.\.\/C\/index\.html">C<\/a><\/p>/,
+    'a derivation page opens with its tails and head from the graph',
+  );
+  assert.doesNotMatch(await readFile(path.join(output, 'objects/C/index.html'), 'utf8'), /derivon-endpoints"/);
   await assert.rejects(readFile(path.join(output, 'objects/h-alt/index.html'), 'utf8'));
 
   const refused = run(exporter, [root, '--output', output, '--start', 'A', '--start', 'B', '--target', 'C']);

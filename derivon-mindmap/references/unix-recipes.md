@@ -269,19 +269,22 @@ out=$($CMD set-metadata "$ROOT" <<<"$payload") || true
 jq -r '.issues[] | "\(.code): \(.path): \(.message)"' <<<"$out"
 ```
 
-## Crosslink, validate, and report
+## Link, validate, and report
+
+The link steps and what each diagnostic means are in
+[object documents](object-documents.md#link-the-concepts-you-mean).
 
 ```sh
-$CMD crosslink "$ROOT" ID...
-$CMD crosslink "$ROOT" --all --check      # report only
+$CMD find-objects "$ROOT" 零空间 --from ID | jq -r '.result.candidates[] | "\(.link)\t\(.detail)"'
+$CMD crosslink "$ROOT" ID... --check | jq -r '.result.suggestions[] | "\(.id)\t\(.context)"'
+$CMD crosslink "$ROOT" ID... --apply ID:CONCEPT  # write the suggestions that mean that concept
 $CMD render "$ROOT" ID...
 $CMD validate "$ROOT"
 ```
 
-Crosslink exact changed objects after editing prose. Check a broad migration with
-`--all --check` and get confirmation before `--all`. After completion, report point
-and hyperedge changes separately and list each updated concept/derivation document
-with ID, label when applicable, relative path, and reason.
+After completion, report point and hyperedge changes separately and list each
+updated concept/derivation document with ID, label when applicable, relative path,
+and reason.
 
 ## Export a route textbook
 

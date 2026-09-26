@@ -42,7 +42,7 @@ npx skills update --project -y
 Start a new Agent session after updating so it loads the new skill instructions.
 
 Simple workspace recipes require `derivon`, `jq`, and a POSIX shell. Windows
-users can use WSL or Git Bash. The bundled workspace validator, crosslinker,
+users can use WSL or Git Bash. The bundled workspace validator, crosslinker, object search,
 renderer, textbook exporter, and learner-record commands require Node.js but no
 workspace npm dependencies.
 
@@ -74,7 +74,7 @@ npm install
 npm test
 ```
 
-`npm run build` creates the checked-in self-contained crosslinker, renderer, and
+`npm run build` creates the checked-in self-contained crosslinker, object search, renderer, and
 textbook exporter. Tests exercise executable tools against real workspace
 fixtures, including learner-record writes, route export, and a loopback preview
 server. Skill prose is reviewed directly; tests do not infer Agent behavior from

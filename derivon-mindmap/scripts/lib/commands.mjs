@@ -40,7 +40,7 @@ export const COMMANDS = [
     name: 'validate',
     artifact: 'workspace',
     capability: 'read',
-    summary: 'Audit a workspace manifest, its graph and its referenced documents.',
+    summary: 'Audit a workspace manifest, its graph and its referenced documents, including document links to files that do not exist in the workspace.',
     argv: [
       { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' },
       { name: 'manifest', flag: '--manifest', kind: 'path', required: false, description: 'Audit this manifest instead of <workspace>/.derivon/workspace.json.' },
@@ -66,16 +66,38 @@ export const COMMANDS = [
     name: 'crosslink',
     artifact: 'workspace',
     capability: 'write-document',
-    summary: 'Add exact-label crosslinks to documents; --check reports them without writing.',
+    summary: 'Suggest links for the first exact-label mention of each concept in the selected documents, and write only the suggestions named by --apply. A link the author wrote to another target is kept.',
     argv: [
       { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' },
       { name: 'selectors', positional: true, kind: 'id', required: false, repeatable: true, description: 'Object ids, document directories, or document.md paths.' },
       { name: 'all', flag: '--all', kind: 'boolean', required: false, description: 'Select every object.' },
-      { name: 'check', flag: '--check', kind: 'boolean', required: false, description: 'Report missing crosslinks without writing them.' },
+      { name: 'apply', flag: '--apply', kind: 'id', required: false, repeatable: true, description: 'A suggestion id <document-object-id>:<concept-id> to write because it means that concept.' },
+      { name: 'check', flag: '--check', kind: 'boolean', required: false, description: 'Report suggestions without writing.' },
     ],
     stdin: null,
-    result: { changed: ['documents'], fields: [{ name: 'selectedDocuments', description: 'Documents examined.' }, { name: 'insertionCount', description: 'Crosslinks added or pending.' }] },
+    result: { changed: ['documents'], fields: [
+      { name: 'selectedDocuments', description: 'Documents examined.' },
+      { name: 'written', description: 'Links written by this call.' },
+      { name: 'suggestions', description: 'Each suggestion: id, source, line, context with the matched text in brackets, targetId, written. Apply one only when its context means that concept.' },
+      { name: 'kept', description: 'Author links left as written, each suppressing its label in that document.' },
+    ] },
     run: runCrosslink,
+  },
+  {
+    name: 'find-objects',
+    artifact: 'workspace',
+    capability: 'read',
+    summary: 'Find the objects a piece of text may mean, ranked like the editor\'s reference picker; with --from, each candidate carries a Markdown link relative to that object\'s document.',
+    argv: [
+      { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' },
+      { name: 'query', positional: true, kind: 'string', required: true, repeatable: true, description: 'Text to look up: a label, an id, or words from a description.' },
+      { name: 'from', flag: '--from', kind: 'id', required: false, description: 'The object whose document will hold the link.' },
+      { name: 'kind', flag: '--kind', kind: 'string', values: ['concept', 'derivation'], required: false, description: 'Only concepts or only derivations.' },
+      { name: 'limit', flag: '--limit', kind: 'number', required: false, description: 'Most candidates to return; default 10.' },
+    ],
+    stdin: null,
+    result: { changed: [], fields: [{ name: 'candidates', description: 'kind, id, label, detail, document, and link when --from is given.' }] },
+    run: runFindObjects,
   },
   {
     name: 'new-object-id',
@@ -293,6 +315,11 @@ async function runValidate({ argv, context }) {
     return { issues: [issue(code, relativeLabel(context.root, manifestPath), error.message)] };
   }
   const { issues, concepts, derivations } = await auditWorkspace({ root: context.root, manifest });
+  if (!issues.length) {
+    const links = runJsonTool('crosslink-documents.mjs', ['--audit-links', '--json', '--manifest', manifestPath, context.root]);
+    if (links.error) issues.push(links.error);
+    else issues.push(...(links.value.issues ?? []).map((entry) => issue(entry.code, entry.source, entry.message)));
+  }
   return { result: { concepts, derivations }, issues };
 }
 
@@ -305,32 +332,45 @@ async function runRender({ argv, context }) {
 async function runCrosslink({ argv, context }) {
   const all = takeFlag(argv, '--all');
   const check = takeFlag(argv, '--check');
+  const apply = [];
+  for (let value = takeValue(argv, '--apply'); value !== undefined && value !== null; value = takeValue(argv, '--apply')) apply.push(value);
   if (all && argv.length) throw new UsageError('Choose either --all or explicit selectors, not both');
   if (!all && !argv.length) throw new UsageError('crosslink requires --all or at least one selector');
+  if (check && apply.length) throw new UsageError('--apply writes; drop --check');
   const toolArgs = ['--json'];
   if (!check) toolArgs.push('--write');
+  for (const id of apply) toolArgs.push('--apply', id);
   toolArgs.push(context.root);
   if (all) toolArgs.push('--all');
   else toolArgs.push(...argv);
   const report = runJsonTool('crosslink-documents.mjs', toolArgs);
   if (report.error) return { issues: [report.error] };
   const value = report.value;
+  const suggestions = value.suggestions ?? [];
   const issues = (value.issues ?? []).map((entry) => issue(entry.code ?? CODE.CROSSLINK_PARSE_ERROR, entry.source, entry.message));
-  const sources = [...new Set((value.insertions ?? []).map((entry) => entry.source.replace(/\/document\.md$/, '')))];
-  if (check) {
-    for (const entry of value.insertions ?? []) {
-      issues.push(issue(CODE.CROSSLINK_MISSING, entry.source, `missing crosslink to ${entry.targetId} for ${JSON.stringify(entry.display)}`));
-    }
-  }
+  const sources = [...new Set(suggestions.filter((entry) => entry.written).map((entry) => entry.source.replace(/\/document\.md$/, '')))];
   return {
-    changed: { documents: check ? [] : sources },
+    changed: { documents: sources },
     result: {
       selectedDocuments: value.selectedDocuments ?? 0,
-      insertionCount: value.insertionCount ?? 0,
-      changedDocuments: value.changedDocuments ?? 0,
+      written: value.writtenCount ?? 0,
+      suggestions: suggestions.map(({ id, source, line, context, targetId, written }) => ({ id, source, line, context, targetId, written })),
+      kept: (value.notices ?? []).map(({ source, line, message }) => ({ source, line, message })),
     },
     issues,
   };
+}
+
+async function runFindObjects({ argv, context }) {
+  const toolArgs = ['--json', '--manifest', context.manifestPath];
+  for (const flag of ['--from', '--kind', '--limit']) {
+    const value = takeValue(argv, flag);
+    if (value !== undefined && value !== null) toolArgs.push(flag, value);
+  }
+  if (!argv.length) throw new UsageError('find-objects needs the text to look up');
+  const report = runJsonTool('find-objects.mjs', [...toolArgs, context.root, ...argv]);
+  if (report.error) return { issues: [report.error] };
+  return { result: { query: report.value.query, candidates: report.value.candidates ?? [] }, issues: [] };
 }
 
 async function runNewObjectId({ argv, context }) {

@@ -29466,6 +29466,7 @@ for (let cursor = 0; cursor < queue.length; cursor += 1) {
 var stageRoot = await prepareStage(outputRoot, force);
 try {
   const exportedEntries = [...sequence, ...references];
+  const exportedIds = new Set(exportedEntries.map((entry) => entry.id));
   for (const entry of exportedEntries) {
     const destination = path3.join(stageRoot, "objects", entry.id);
     await mkdir(path3.dirname(destination), { recursive: true });
@@ -29477,14 +29478,14 @@ try {
     const rewritten = rewriteObjectLinks(htmlById.get(entry.id), linksById.get(entry.id));
     const previous = sequence[index - 1];
     const next = sequence[index + 1];
-    await writeFile(file, injectNavigation(rewritten, previous, next), "utf8");
+    await writeFile(file, injectNavigation(rewritten, previous, next, endpointLine(objectById.get(entry.id), exportedIds)), "utf8");
   }
   for (const entry of references) {
     const file = path3.join(stageRoot, entry.href);
     const rewritten = rewriteObjectLinks(htmlById.get(entry.id), linksById.get(entry.id));
     const firstReferrerId = [...referrers.get(entry.id) ?? []][0];
     const firstReferrer = firstReferrerId ? entryFor(objectById.get(firstReferrerId), "referrer") : null;
-    await writeFile(file, injectReferenceNavigation(rewritten, firstReferrer), "utf8");
+    await writeFile(file, injectReferenceNavigation(rewritten, firstReferrer, endpointLine(objectById.get(entry.id), exportedIds)), "utf8");
   }
   const routeDocument = {
     schema: ROUTE_SCHEMA,
@@ -29624,18 +29625,27 @@ function visitHtml(node, visitor) {
   visitor(node);
   for (const child of node.childNodes ?? []) visitHtml(child, visitor);
 }
-function injectNavigation(html, previous, next) {
+function endpointLine(object, exportedIds) {
+  if (object?.kind !== "derivation") return "";
+  const item = (id) => {
+    const label = escapeHtml2(pointById.get(id)?.data?.label || id);
+    return exportedIds.has(id) ? `<a href="../${encodeURIComponent(id)}/index.html">${label}</a>` : `<span>${label}</span>`;
+  };
+  const tails = object.tails.length ? object.tails.map(item).join('<span class="derivon-plus"> + </span>') : "<span>\u2205</span>";
+  return `<p class="derivon-endpoints" aria-label="Tails and head">${tails}<span class="derivon-arrow"> \u2192 </span>${item(object.head)}</p><style>.derivon-endpoints{max-width:820px;margin:0 auto 20px;font:15px/1.6 system-ui,sans-serif}.derivon-endpoints a{color:#245f72}.derivon-endpoints .derivon-plus,.derivon-endpoints .derivon-arrow{color:#68716c}</style>`;
+}
+function injectNavigation(html, previous, next, endpoints = "") {
   if (!/<body(?:\s[^>]*)?>/i.test(html)) fail("Object publication is not a complete HTML document with a body element.");
   const nav = `<nav class="derivon-textbook-nav" aria-label="Textbook navigation"><a href="../../index.html">Contents</a>${previous ? `<a rel="prev" href="../${encodeURIComponent(previous.id)}/index.html">Previous</a>` : ""}${next ? `<a rel="next" href="../${encodeURIComponent(next.id)}/index.html">Next</a>` : ""}</nav><style>.derivon-textbook-nav{position:relative;display:flex;gap:12px;flex-wrap:wrap;max-width:820px;margin:0 auto 20px;padding:12px 0;border-bottom:1px solid #d5d8d3;font:14px/1.4 system-ui,sans-serif}.derivon-textbook-nav a{color:#245f72}.derivon-textbook-nav a[rel=next]{margin-left:auto}</style>`;
   return html.replace(/<body(\s[^>]*)?>/i, (match) => `${match}
-${nav}`);
+${nav}${endpoints}`);
 }
-function injectReferenceNavigation(html, referrer) {
+function injectReferenceNavigation(html, referrer, endpoints = "") {
   if (!/<body(?:\s[^>]*)?>/i.test(html)) fail("Reference publication is not a complete HTML document with a body element.");
   const back = referrer ? `<a href="../${encodeURIComponent(referrer.id)}/index.html">Referenced from ${escapeHtml2(referrer.title)}</a>` : "";
   const nav = `<nav class="derivon-textbook-nav" aria-label="Reference navigation"><a href="../../index.html">Contents</a>${back}</nav><style>.derivon-textbook-nav{position:relative;display:flex;gap:12px;flex-wrap:wrap;max-width:820px;margin:0 auto 20px;padding:12px 0;border-bottom:1px solid #d5d8d3;font:14px/1.4 system-ui,sans-serif}.derivon-textbook-nav a{color:#245f72}</style>`;
   return html.replace(/<body(\s[^>]*)?>/i, (match) => `${match}
-${nav}`);
+${nav}${endpoints}`);
 }
 function textbookIndex(manifestValue, routeValue, chapters, references2) {
   const warning = routeValue.provenOptimal ? "" : '<p class="warning"><strong>Warning:</strong> this route was not proven optimal.</p>';

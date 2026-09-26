@@ -31,6 +31,10 @@ await bundle(
   new URL('crosslink-documents.mjs', scriptsDirectory),
 );
 await bundle(
+  new URL('./find-objects.source.mjs', import.meta.url),
+  new URL('find-objects.mjs', scriptsDirectory),
+);
+await bundle(
   new URL('./export-route-textbook.source.mjs', import.meta.url),
   new URL('export-route-textbook.mjs', scriptsDirectory),
   fontPlugins,

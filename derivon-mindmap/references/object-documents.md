@@ -76,6 +76,33 @@ consequence, or qualification when they compete for the same sentence. Then read
 the paragraph as a whole and preserve a coherent progression rather than a list
 of disconnected short statements.
 
+## Link the concepts you mean
+
+A link records which concept a word means, and only the writer knows that. One word
+can name two concepts (an operator's kernel and a matrix's null space), and a label
+can sit inside a longer word (`对角矩阵` inside `三对角矩阵`). So the writer places the
+links and the scripts check them:
+
+1. While writing, link the first meaningful mention of each other concept the
+   prose means. Get the link from `find-objects <text> --from <this object id>`: it
+   ranks candidates the way the editor's reference picker does and returns a ready
+   standard relative `link`. Paste it, then adjust the visible words to fit the
+   sentence.
+2. After writing, run `crosslink` on the changed objects. It returns `suggestions`:
+   the first exact-label mention of each concept not yet linked, each with an `id`
+   and a `context` that brackets the matched text. Run it again with `--apply <id>`
+   for each suggestion whose context means that concept. A label cut out of a longer
+   word, or used in another sense, stays unapplied.
+3. When a word means a concept other than the one its exact label names, write that
+   link yourself. `crosslink` keeps it and stops suggesting the label in that
+   document.
+4. Run `validate`. `dangling-link` names a link to a file that does not exist;
+   replace it with a link from `find-objects`.
+
+Links are reading navigation only, not a prerequisite, derivation, or edge. A
+derivation's tails and head need no link in its document: readers are shown them
+from the graph.
+
 ## Meet the completion gates
 
 A concept document is complete when:
@@ -85,6 +112,7 @@ A concept document is complete when:
 - examples or contrasts needed for recognition are present;
 - source scope and genuine uncertainty are findable;
 - prerequisite-based justification lives in linked derivations;
+- every other concept the prose means is linked at its first mention;
 - every sentence passes the plainspoken pass.
 
 A derivation document is complete when:
@@ -95,6 +123,7 @@ A derivation document is complete when:
 - one identifiable resolving move establishes the head;
 - the account reaches the head without assuming it;
 - source scope, genuine uncertainty, and the weight rationale are findable;
+- other concepts the prose means are linked at their first mention;
 - every sentence passes the plainspoken pass.
 
 These are semantic gates, not required section titles.

@@ -21,12 +21,13 @@ test('central document contract is presentation-aware and chooses the least powe
 });
 
 test('central document contract requires first-mention concept navigation without graph semantics', async () => {
-  const text = await normalized('derivon-mindmap/references/rich-documents.md');
-  assert.match(text, /first meaningful prose mention/i);
-  assert.match(text, /standard relative link/i);
+  const text = await normalized('derivon-mindmap/references/object-documents.md');
+  assert.match(text, /first meaningful mention/i);
+  assert.match(text, /standard relative `link`/i);
   assert.match(text, /reading navigation only, not a prerequisite, derivation/i);
-  assert.match(text, /derivon-workspace\.mjs crosslink/i);
-  assert.match(text, /Whole-workspace `--all` use requires a `--check` report and confirmation/i);
+  assert.match(text, /find-objects <text> --from/i);
+  assert.match(text, /--apply <id>/i);
+  assert.match(text, /shown them\s+from the graph/i);
 });
 
 test('the learner-record boundary is stated where a reader will hit it', async () => {
