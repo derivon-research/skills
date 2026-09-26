@@ -108,8 +108,8 @@ stops, evidence is unavailable, or a new workspace is explicitly chosen.
 
 ## Enforce atomic boundaries
 
-Treat Chinese `与`, `和`, `、`, English `and`, and list coordination as mandatory
-atomicity review signals. Split independently definable, learnable, derivable, or
-reusable concepts. Split a derivation that contains multiple problem pressures or
-resolving moves, exposing reusable intermediate results. A conjunction remains
-only when evidence supports one intrinsically unified understanding state.
+Follow the `derivon-mindmap` model's atomic concepts and label handles, and
+resolve every `validate` label advisory. Split a derivation that contains
+multiple problem pressures or resolving moves, exposing reusable intermediate
+results. A conjunction remains only when evidence supports one intrinsically
+unified understanding state.

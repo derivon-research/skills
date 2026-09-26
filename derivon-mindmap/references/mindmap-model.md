@@ -35,6 +35,25 @@ punctuation, and other coordination are mandatory review signals. A conventional
 coordinated term stays one point only when evidence supports one indivisible
 understanding state. Shortening a label does not split a bundle.
 
+Coordination words only catch bundles that the label shows. Read the document too,
+and apply these rules:
+
+- **A term that documents use as a concept has its own point.** If an object
+  document relies on an idea, such as "operator" or "algebraic multiplicity", and
+  no point holds it, add the point and its derivation.
+- **A definition point defines one concept.** A second concept introduced in
+  passing is split out: an incidence-matrix point must not also define graph, path
+  and tree.
+- **A definition point asserts no theorem.** A claim stated inside a definition
+  becomes its own point with its own hyperedge.
+- **Split a proposition whose parts have different arguments** when downstream work
+  can use one part alone, even if every current consumer happens to need all parts
+  (the left and right distributive laws). A part with its own derivation and its
+  own downstream use is always split.
+- **Keep a proposition whole** when its parts come from one argument and nothing
+  uses them separately, or when the point has no out-edges at all. Splitting then
+  only adds learning cost; split when a real consumer appears.
+
 A concept label is a short noun-like **handle**, because the canvas shows one line
 of about 8 CJK characters and cuts the rest. Keep it at most 8 units wide, counting
 a CJK or fullwidth character as 1 and any other character as 0.5. A proposition is

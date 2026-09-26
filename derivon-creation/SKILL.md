@@ -52,10 +52,9 @@ decisions, not facts an Agent can verify.
 
 ## Keep concepts atomic
 
-Chinese `与`, `和`, `、`, English `and`, and other coordination force review. If
-parts can be understood, reused, derived, or referenced independently, split them
-and re-evaluate every incident edge. A source heading and a shorter label do not
-prove atomic identity.
+Follow the `derivon-mindmap` model's atomic concepts and label handles, and
+resolve every `validate` label advisory. When you split a point, re-evaluate every
+incident edge. A source heading and a shorter label do not prove atomic identity.
 
 ## Use the document surface
 
