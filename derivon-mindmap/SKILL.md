@@ -76,6 +76,8 @@ definitions; do not keep a second one.
 - `write-document` replaces one `document.md`, compare-and-swap on the file.
 - `delete-object` removes graph objects; it never deletes document directories.
 - `import` validates a complete manifest and replaces the current one.
+- `review-label` acknowledges label advisories from `validate`, with a reason,
+  in the companion record `.derivon/label-review.json`.
 - `find-objects` finds the objects a piece of text may mean and returns a ready
   relative link; `crosslink` suggests links for exact-label mentions and writes the
   ones you apply; `render`, `validate` and `export-textbook` are read-only;
@@ -161,7 +163,10 @@ standalone `index.html` in a workspace. Leave existing unrelated HTML files unto
 
 Link the changed documents as the
 [object document contract](references/object-documents.md#link-the-concepts-you-mean)
-says, then run `render` for them and `validate` over the workspace.
+says, then run `render` for them and `validate` over the workspace. Resolve every
+entry in `validate`'s `result.labelReviews` as the
+[Mindmap model](references/mindmap-model.md#atomic-concepts-and-steps) says:
+split, shorten, or acknowledge with a reason.
 
 Preserve Markdown and its inline HTML verbatim outside the requested edits. Follow the
 central object-document contract for every learner-visible source. Use native

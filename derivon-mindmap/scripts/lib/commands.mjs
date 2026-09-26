@@ -30,6 +30,9 @@ import {
   LEARNER_RECORD_FILE_NAMES, MISSING_VERSION, applicationDataRoot, isBasis, learnerRecordFile,
   learnerRecordPath, parseLearnerRecord,
 } from './learner-records.mjs';
+import {
+  LABEL_CHECKS, LABEL_REVIEW_FILE, applyLabelReview, auditLabelReview, readLabelReview, serializeLabelReview,
+} from './label-review.mjs';
 import { OBJECT_ID_PATTERN, auditWorkspace, isUsableWorkspaceId, safeRelativeDirectory } from './workspace-validator.mjs';
 import { runDerivon, runTool } from './derivon.mjs';
 
@@ -46,8 +49,29 @@ export const COMMANDS = [
       { name: 'manifest', flag: '--manifest', kind: 'path', required: false, description: 'Audit this manifest instead of <workspace>/.derivon/workspace.json.' },
     ],
     stdin: null,
-    result: { changed: [], fields: [{ name: 'concepts', description: 'Concept count.' }, { name: 'derivations', description: 'Derivation count.' }] },
+    result: { changed: [], fields: [
+      { name: 'concepts', description: 'Concept count.' },
+      { name: 'derivations', description: 'Derivation count.' },
+      { name: 'labelReviews', description: 'Open label advisories, each { id, label, check, message }: check coordination (the label contains 与, 和, 及, 、, 并且, and, & or list punctuation) or length (wider than the 8 units the canvas shows; a CJK character is 1, others 0.5). Advisories are not issues and never change status or exit code. Resolve each one: split the point, shorten the label to a handle with the statement in data.description, or acknowledge it with review-label.' },
+      { name: 'acknowledgedLabelReviews', description: 'Advisories silenced by .derivon/label-review.json.' },
+      { name: 'staleLabelReviews', description: 'Acknowledgements that silence nothing because the point is gone or its label changed; the next review-label prunes them.' },
+    ] },
     run: runValidate,
+  },
+  {
+    name: 'review-label',
+    artifact: 'workspace',
+    capability: 'write-structure',
+    summary: 'Acknowledge label advisories that validate reports, recording the current label and a reason in .derivon/label-review.json; renaming the point re-opens the review.',
+    argv: [{ name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' }],
+    stdin: { required: true, schema: 'derivon.label-review-request/v1', description: '{ entries: [{ id, check, reason }] } — check is coordination or length; reason says why this label stays after considering a split and a shorter handle. Every entry must name an existing concept whose advisory is open now, or nothing is written.' },
+    result: { changed: [], fields: [
+      { name: 'file', description: 'The record written, .derivon/label-review.json.' },
+      { name: 'recorded', description: 'The acknowledgements this call wrote: id, label, check.' },
+      { name: 'pruned', description: 'Stale acknowledgements removed.' },
+      { name: 'entries', description: 'Acknowledgements in the record after the write.' },
+    ] },
+    run: runReviewLabel,
   },
   {
     name: 'render',
@@ -320,7 +344,18 @@ async function runValidate({ argv, context }) {
     if (links.error) issues.push(links.error);
     else issues.push(...(links.value.issues ?? []).map((entry) => issue(entry.code, entry.source, entry.message)));
   }
-  return { result: { concepts, derivations }, issues };
+  const labels = await auditLabelReview({ root: context.root, manifest });
+  issues.push(...labels.issues);
+  return {
+    result: {
+      concepts,
+      derivations,
+      labelReviews: labels.labelReviews,
+      acknowledgedLabelReviews: labels.acknowledged,
+      staleLabelReviews: labels.stale,
+    },
+    issues,
+  };
 }
 
 async function runRender({ argv, context }) {
@@ -578,6 +613,77 @@ async function runImport({ argv, context, stdin }) {
       id: manifest.id,
       concepts: Array.isArray(manifest.graph?.points) ? manifest.graph.points.length : 0,
       derivations: Array.isArray(manifest.graph?.hyperedges) ? manifest.graph.hyperedges.length : 0,
+    },
+  };
+}
+
+/**
+ * Acknowledge label advisories. The whole batch is checked before anything is written: every
+ * entry must name an existing concept, a known check, a reason, and an advisory that is open for
+ * the concept's current label. The record keeps that label, so a later rename re-opens the
+ * review; stale entries are pruned on the way through. A malformed record is refused rather than
+ * overwritten, because it may hold reasons nobody else has.
+ */
+async function runReviewLabel({ argv, context, stdin }) {
+  assertNoArguments(argv);
+  const guard = requireManifest(context);
+  if (guard) return { issues: [guard] };
+  const parsed = parseObject(stdin, ['schema', 'entries']);
+  if (parsed.error) return { issues: [parsed.error] };
+  const { entries: requested } = parsed.payload;
+  if (!Array.isArray(requested) || !requested.length) {
+    return { issues: [issue(CODE.INVALID_PAYLOAD, '/entries', 'expected a non-empty array of { id, check, reason }')] };
+  }
+
+  const recordPath = path.join(context.root, LABEL_REVIEW_FILE);
+  const record = await readLabelReview(context.root);
+  if (record.issues) return { issues: record.issues.map((entry) => ({ ...entry, message: `${entry.message}; repair or remove the record before acknowledging more labels` })) };
+
+  const points = new Map(graphOf(context.manifest).points.map((point) => [point.id, point]));
+  const { advisories, live, stale } = applyLabelReview(context.manifest, record.entries);
+  const issues = [];
+  const recorded = [];
+  const seen = new Set();
+  for (const [index, entry] of requested.entries()) {
+    const at = `/entries/${index}`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) { issues.push(issue(CODE.INVALID_PAYLOAD, at, 'expected { id, check, reason }')); continue; }
+    const unknown = Object.keys(entry).filter((key) => !['id', 'check', 'reason'].includes(key));
+    if (unknown.length) { issues.push(issue(CODE.INVALID_PAYLOAD, at, `unknown field(s): ${unknown.join(', ')}`)); continue; }
+    const { id, check, reason } = entry;
+    if (!LABEL_CHECKS.includes(check)) { issues.push(issue(CODE.INVALID_PAYLOAD, `${at}/check`, `expected one of ${LABEL_CHECKS.join(', ')}`)); continue; }
+    if (typeof reason !== 'string' || !reason.trim()) { issues.push(issue(CODE.INVALID_PAYLOAD, `${at}/reason`, 'expected a non-empty reason why this label stays')); continue; }
+    const point = typeof id === 'string' ? points.get(id) : undefined;
+    if (!point) { issues.push(issue(CODE.UNKNOWN_OBJECT, `${at}/id`, `no concept ${JSON.stringify(id ?? null)}`)); continue; }
+    if (!advisories.some((advisory) => advisory.id === id && advisory.check === check)) {
+      issues.push(issue(CODE.LABEL_REVIEW_NOT_APPLICABLE, at, `concept ${id} (${JSON.stringify(point.data?.label ?? null)}) raises no ${check} advisory; there is nothing to acknowledge`));
+      continue;
+    }
+    if (seen.has(`${id}\u0000${check}`)) { issues.push(issue(CODE.INVALID_PAYLOAD, at, `duplicate entry for ${id} ${check}`)); continue; }
+    seen.add(`${id}\u0000${check}`);
+    recorded.push({ id, label: point.data.label, check, reason: reason.trim() });
+  }
+  if (issues.length) return { issues };
+
+  const kept = live.filter((entry) => !seen.has(`${entry.id}\u0000${entry.check}`));
+  const entries = [...kept, ...recorded];
+  const beforeText = record.text;
+  try {
+    await replaceFileAtomically(recordPath, serializeLabelReview(entries), {
+      temporaryDirectory: context.root,
+      beforeReplace: async () => {
+        const latest = await readFile(recordPath, 'utf8').catch((error) => (error.code === 'ENOENT' ? null : Promise.reject(error)));
+        if (latest !== beforeText) throw conflictError('the label-review record changed while the command ran; re-read and retry');
+      },
+    });
+  } catch (error) {
+    return { issues: [issue(error.code === CODE.CONFLICT_PRECONDITION ? CODE.CONFLICT_PRECONDITION : CODE.IO_ERROR, LABEL_REVIEW_FILE, error.message)] };
+  }
+  return {
+    result: {
+      file: LABEL_REVIEW_FILE,
+      recorded: recorded.map(({ id, label, check }) => ({ id, label, check })),
+      pruned: stale,
+      entries: entries.length,
     },
   };
 }

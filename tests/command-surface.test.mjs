@@ -106,7 +106,13 @@ test('capabilities is the single command manifest and every declared command run
       import: [[root], JSON.stringify(BASE_MANIFEST)],
       'read-learner-record': [[root, '--data-dir', dataDir], undefined],
       'write-learner-record': [[root, '--data-dir', dataDir, '--expected-version', 'missing'], JSON.stringify({ schema: 'derivon.learning/v1', concepts: {}, derivations: {} })],
+      'review-label': [[root], JSON.stringify({ entries: [{ id: 'A', check: 'coordination', reason: 'Fixture term.' }] })],
     };
+    if (command.name === 'review-label') {
+      const renamed = structuredClone(BASE_MANIFEST);
+      renamed.graph.points[0].data.label = 'Alpha and Omega';
+      await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify(renamed, null, 2)}\n`);
+    }
     const [args, input] = invocations[command.name];
     const result = run([command.name, ...args], input);
     const output = JSON.parse(result.stdout);

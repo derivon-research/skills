@@ -7,7 +7,8 @@ source fidelity, and a checkable prose standard.
 ## Give each document one role
 
 A concept document states one reusable understanding state or established claim.
-Open with the concept and its category, delimit its scope, distinguish its nearest
+Open with the concept and its category; when the concept is a proposition, the
+first sentence states it in full, because the label is only its handle. Delimit its scope, distinguish its nearest
 neighbors, and use an example, counterexample, or contrast when that makes the
 boundary easier to recognize. It may state a result. Incoming derivations own the
 arguments that establish that result; link to those derivations instead of
@@ -40,7 +41,10 @@ from it; chronology alone supplies no derivation.
 
 When a concept is a named viewpoint, label it with the author or school and a
 plain-language thesis, such as `Proclus: the fifth postulate should be proved`.
-A person, school, or era by itself is not an understanding state.
+A person, school, or era by itself is not an understanding state. Keep the thesis
+as short as stays recognizable and state it in full in `data.description`; when
+author and thesis together cannot fit 8 units, acknowledge the `length` advisory
+with that reason.
 
 ## Let the teaching content choose its shape
 

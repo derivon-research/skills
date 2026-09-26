@@ -74,13 +74,16 @@ cropped, or redrawn; report omitted decorative figures with reasons and all
 blockers. Do not create a persistent figure inventory or a second whole-book
 media pass.
 
-## Enforce atomic concepts
+## Enforce atomic concepts and short labels
 
-Chinese `与`, `和`, `、`, English `and`, and other coordination are mandatory
-review signals. If either part can be defined, learned, derived, reused, or
-referenced independently, create separate points and model their actual relation.
-A conventional coordinated term remains one point only when the source supports
-one indivisible understanding state. Merely shortening the label is not a fix.
+Follow the `derivon-mindmap` model's atomic concepts and label handles. Source
+headings and theorem statements are rarely usable labels: a heading often lists
+several concepts, and a theorem statement is a proposition. Split a list into
+points the source defines separately. Give a proposition the book's name for it,
+or a coined handle, and put the statement in `data.description` and the
+document's first sentence. Resolve every `validate` label advisory before the
+chapter is complete; acknowledge one with `review-label` only when the source
+supports one indivisible understanding under that exact name.
 
 ## Revise earlier chapters carefully
 
@@ -93,5 +96,5 @@ structure, and affected objects; wait for confirmation.
 
 Run full validation and representative route queries. Report imported chapters,
 concept identity decisions, parallel routes, uncertain claims, high-weight
-atomicity reviews, source/publication status, and every updated document. Do not
+atomicity reviews, acknowledged label advisories with their reasons, source/publication status, and every updated document. Do not
 claim completion merely because every heading became a point.

@@ -234,6 +234,34 @@ test('exporter follows executable order, preserves assets, and protects output',
   assert.match(unreachable.stderr, /unreachable/i);
 });
 
+test('exporter writes an empty tail set as words in the label\'s script, never as ∅', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const manifestPath = path.join(root, '.derivon/workspace.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.graph.points.push({ id: 'E', data: { label: '零空间', document: 'docs/e' } });
+  manifest.graph.hyperedges.push(
+    { id: 'h-e', weight: 1, tails: [], head: 'E', data: { document: 'docs/h-e' } },
+    { id: 'h-d', weight: 1, tails: [], head: 'D', data: { document: 'docs/h-d' } },
+  );
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  for (const [directory, markdown] of [['docs/e', '# 零空间\n\n定义。\n'], ['docs/h-e', '# 入口\n\n直接定义。\n'], ['docs/h-d', '# Entrance\n\nDefined directly.\n']]) {
+    await mkdir(path.join(root, directory), { recursive: true });
+    await writeFile(path.join(root, directory, 'document.md'), markdown);
+  }
+
+  for (const [target, edge, words] of [['E', 'h-e', '无前提'], ['D', 'h-d', 'no premises']]) {
+    const output = path.join(root, `textbook-${target}`);
+    const exported = run(exporter, [root, '--output', output, '--target', target]);
+    assert.equal(exported.status, 0, exported.stderr);
+    const page = await readFile(path.join(output, `objects/${edge}/index.html`), 'utf8');
+    assert.match(page, new RegExp(`<p class="derivon-endpoints"[^>]*><span class="derivon-no-premises">${words}</span><span class="derivon-arrow"> → </span>`));
+    assert.doesNotMatch(page, /∅/);
+    const route = JSON.parse(await readFile(path.join(output, 'route.json'), 'utf8'));
+    assert.equal(route.chapters.find((entry) => entry.id === edge).title, `${words} -> ${target}`);
+  }
+});
+
 test('exporter rewrites object links and copies recursive reference closure without changing route chapters', async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));

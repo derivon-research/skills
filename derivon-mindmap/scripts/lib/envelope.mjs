@@ -64,6 +64,8 @@ export const CODE = {
   LEARNER_RECORD_UNREADABLE: 'learner-record-unreadable',
   LEARNER_RECORD_INVALID: 'learner-record-invalid',
   BASIS_UNCOMPUTABLE: 'basis-uncomputable',
+  LABEL_REVIEW_INVALID: 'label-review-invalid',
+  LABEL_REVIEW_NOT_APPLICABLE: 'label-review-not-applicable',
 };
 
 /** One diagnostic. `path` is a workspace-relative path or JSON pointer; `.` means the workspace. */

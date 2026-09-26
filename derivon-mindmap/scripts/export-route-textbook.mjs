@@ -29533,7 +29533,7 @@ function entryFor(object, role) {
     id: object.id,
     kind: object.kind,
     role,
-    title: object.kind === "concept" ? object.data.label : `${object.tails.join(" + ") || "empty"} -> ${object.head}`,
+    title: object.kind === "concept" ? object.data.label : `${object.tails.join(" + ") || noPremises(object.head)} -> ${object.head}`,
     href: `objects/${object.id}/index.html`
   };
 }
@@ -29631,8 +29631,12 @@ function endpointLine(object, exportedIds) {
     const label = escapeHtml2(pointById.get(id)?.data?.label || id);
     return exportedIds.has(id) ? `<a href="../${encodeURIComponent(id)}/index.html">${label}</a>` : `<span>${label}</span>`;
   };
-  const tails = object.tails.length ? object.tails.map(item).join('<span class="derivon-plus"> + </span>') : "<span>\u2205</span>";
-  return `<p class="derivon-endpoints" aria-label="Tails and head">${tails}<span class="derivon-arrow"> \u2192 </span>${item(object.head)}</p><style>.derivon-endpoints{max-width:820px;margin:0 auto 20px;font:15px/1.6 system-ui,sans-serif}.derivon-endpoints a{color:#245f72}.derivon-endpoints .derivon-plus,.derivon-endpoints .derivon-arrow{color:#68716c}</style>`;
+  const tails = object.tails.length ? object.tails.map(item).join('<span class="derivon-plus"> + </span>') : `<span class="derivon-no-premises">${escapeHtml2(noPremises(object.head))}</span>`;
+  return `<p class="derivon-endpoints" aria-label="Tails and head">${tails}<span class="derivon-arrow"> \u2192 </span>${item(object.head)}</p><style>.derivon-endpoints{max-width:820px;margin:0 auto 20px;font:15px/1.6 system-ui,sans-serif}.derivon-endpoints a{color:#245f72}.derivon-endpoints .derivon-plus,.derivon-endpoints .derivon-arrow,.derivon-endpoints .derivon-no-premises{color:#68716c}</style>`;
+}
+function noPremises(headId) {
+  const label = pointById.get(headId)?.data?.label ?? "";
+  return new RegExp("\\p{Script=Han}", "u").test(label) ? "\u65E0\u524D\u63D0" : "no premises";
 }
 function injectNavigation(html, previous, next, endpoints = "") {
   if (!/<body(?:\s[^>]*)?>/i.test(html)) fail("Object publication is not a complete HTML document with a body element.");

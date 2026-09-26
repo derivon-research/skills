@@ -30,10 +30,32 @@ separate relation layer rather than falsifying derivation semantics.
 ## Atomic concepts and steps
 
 A point must not bundle parts that can be defined, learned, derived, referenced,
-or reused independently. Chinese `与`, `和`, `、`, English `and`, list punctuation,
-and other coordination are mandatory review signals. A conventional coordinated
-term stays one point only when evidence supports one indivisible understanding
-state. Shortening a label is not a semantic split.
+or reused independently. Chinese `与`, `和`, `及`, `、`, `并且`, English `and`, list
+punctuation, and other coordination are mandatory review signals. A conventional
+coordinated term stays one point only when evidence supports one indivisible
+understanding state. Shortening a label does not split a bundle.
+
+A concept label is a short noun-like **handle**, because the canvas shows one line
+of about 8 CJK characters and cuts the rest. Keep it at most 8 units wide, counting
+a CJK or fullwidth character as 1 and any other character as 0.5. A proposition is
+still one point, since tails and heads can only be points, but its full statement
+goes in `data.description` and the first sentence of its concept document. Use the
+conventional name when one exists (`秩–零化度定理`). Otherwise coin a handle that
+no other label uses and that does not read as a definition: `零空间维数公式`, not
+`零空间维数`, for "the null space has dimension n − r".
+
+`validate` checks every concept label and lists what needs review in
+`result.labelReviews`: `coordination` for a coordination signal, `length` for a
+label wider than 8. These advisories never fail validation, and a batch is done
+only when each one is resolved, in this order:
+
+1. **Split** the point when its parts can be defined, derived, or referenced
+   independently, and model their actual relation.
+2. **Shorten** the label to a handle and move the statement into
+   `data.description` and the document's first sentence.
+3. **Acknowledge** with `review-label` and a reason only when the label must stay
+   as it is, such as a conventional coordinated term. The record keeps the exact
+   label, so a rename puts it up for review again.
 
 A hyperedge must expose reusable intermediate results instead of hiding several
 substantial moves in one step. It contains one problem pressure and one

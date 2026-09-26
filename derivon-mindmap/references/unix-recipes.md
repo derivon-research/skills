@@ -161,8 +161,9 @@ trap - 0 1 2 15
 ```
 
 Omit `markdown` to adopt a `document.md` that already exists, for example one
-extracted from a source. Coordination in a proposed label requires the atomicity
-review from the Mindmap model. If the call refuses, the manifest is unchanged and a
+extracted from a source. A label is a short handle with the statement in
+`description`, and `validate` flags coordination and overlong labels for the
+atomicity review in the Mindmap model. If the call refuses, the manifest is unchanged and a
 document directory the command created is removed again.
 
 ## Add a hyperedge and document
@@ -279,8 +280,20 @@ $CMD find-objects "$ROOT" 零空间 --from ID | jq -r '.result.candidates[] | "\
 $CMD crosslink "$ROOT" ID... --check | jq -r '.result.suggestions[] | "\(.id)\t\(.context)"'
 $CMD crosslink "$ROOT" ID... --apply ID:CONCEPT  # write the suggestions that mean that concept
 $CMD render "$ROOT" ID...
-$CMD validate "$ROOT"
+$CMD validate "$ROOT" | jq -r '.result.labelReviews[] | "\(.id)\t\(.check)\t\(.label)"'
 ```
+
+Resolve each label advisory by splitting the point or shortening the label
+(`set-metadata`). Acknowledge only the labels that must stay, each with its reason,
+in one batch:
+
+```sh
+jq -cn '{entries:[{id:"c-k7f3q2", check:"coordination", reason:"Conventional name of one construction."}]}' \
+  | $CMD review-label "$ROOT"
+```
+
+The call refuses the whole batch when an id is not a concept or its advisory is not
+open, and a later rename of an acknowledged concept re-opens its review.
 
 After completion, report point and hyperedge changes separately and list each
 updated concept/derivation document with ID, label when applicable, relative path,
