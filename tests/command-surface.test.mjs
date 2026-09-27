@@ -393,6 +393,25 @@ test('delete-object removes the graph object and never its document directory', 
   assert.equal(JSON.parse(unknown.stdout).issues[0].code, 'unknown-object');
 });
 
+test('structural commands keep the order of the graph keys the manifest already has', async (t) => {
+  for (const order of [['hyperedges', 'points'], ['points', 'hyperedges']]) {
+    const root = await fixture();
+    t.after(() => rm(root, { recursive: true, force: true }));
+    const graph = Object.fromEntries(order.map((key) => [key, BASE_MANIFEST.graph[key]]));
+    await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify({ ...BASE_MANIFEST, graph }, null, 2)}\n`);
+
+    for (const [args, input] of [
+      [['add-concept', root], JSON.stringify({ id: 'C', data: { label: 'Gamma', document: 'docs/c' }, markdown: '# Gamma\n' })],
+      [['add-derivation', root], JSON.stringify({ id: 'h-bc', tails: ['B'], head: 'C', weight: 1, data: { document: 'docs/h-bc' }, markdown: '# Beta to Gamma\n' })],
+      [['delete-object', root, 'h-ab']],
+    ]) {
+      const result = run(args, input);
+      assert.equal(result.status, 0, result.stdout + result.stderr);
+      assert.deepEqual(Object.keys(JSON.parse(await manifest(root)).graph), order, `${args[0]} with ${order[0]} first`);
+    }
+  }
+});
+
 test('write-document replaces one document and crosslink stays behind the command surface', async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
