@@ -107,7 +107,7 @@ links and the scripts check them:
 
 Links are reading navigation only, not a prerequisite, derivation, or edge. A
 derivation's tails and head need no link in its document: readers are shown them
-from the graph.
+from the graph, and `crosslink` never suggests them there.
 
 ## Meet the completion gates
 

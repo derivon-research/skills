@@ -32,8 +32,17 @@ continue from, then inspect source citations and existing graph content.
    is such a step. Chapter order, adjacent sections, citation, chronology,
    similarity, and co-occurrence are not derivations. What the source only
    asserts becomes a memorisation derivation, as described below.
-5. Preserve distinct source arguments as parallel hyperedges. Split reusable
-   intermediate results rather than hiding them inside a large edge.
+5. Read the existing derivations with the same head before adding one, and decide
+   between **reuse** and a **parallel** hyperedge:
+   - The source reuses an existing derivation when that derivation makes the
+     source's move and all its tails are concepts the source has already
+     introduced. Add nothing; list its id among the chapter's reused derivations,
+     so the source's route stays complete.
+   - Add a parallel hyperedge when the source argues differently, when it motivates
+     the step from a concept the existing derivation lacks, or when the existing
+     derivation needs a concept the source has not introduced yet.
+
+   Split reusable intermediate results rather than hiding them inside a large edge.
 6. Calibrate each whole-step weight for the frozen audience using the Mindmap
    model's 0-5 cognitive-cost anchors and record the rationale/source.
 7. Write independently useful object documents. Preserve the author's wording and
@@ -46,7 +55,7 @@ continue from, then inspect source citations and existing graph content.
    and the workspace references in the same call that writes the documents first
    and replaces the manifest last. Link the changed documents as the
    `derivon-mindmap` object-document contract says, render Markdown, and report every graph, source-document, publication, and
-   inserted-reference change for this chapter.
+   inserted-reference change for this chapter, including the reused derivations.
 9. Continue automatically. Pause only when evidence cannot settle a semantic
    ambiguity or when a destructive revision of prior work needs confirmation.
 
@@ -69,10 +78,14 @@ derivations with the same head:
   propose adding it.
 - When one with the same tails makes the same unmotivated move, it is the same
   derivation. Propose keeping one, at the memorisation weight.
+- When one with the same tails argues the claim, the source reuses it (step 5)
+  and nothing is memorised: an argument already in the graph is what the learner
+  pays for, however briefly the source states the claim. A one-line check from a
+  definition, such as (Aᵀ)ᵀ = A, stays at the argued weight.
 
-Both are revisions of earlier work; confirm them first. Afterwards, derivations
-with the same tails and head differ in their argument, never only in how
-generously a source was read.
+The first two are revisions of earlier work; confirm them first. Afterwards,
+derivations with the same tails and head are one derivation, never two that differ
+only in how generously a source was read.
 
 ## Preserve meaning-bearing figures
 

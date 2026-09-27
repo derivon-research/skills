@@ -212,3 +212,16 @@ test('the link audit reports links to missing workspace files and nothing about 
   await writeFile(path.join(root, 'docs/h-loop/figure.png'), 'png');
   assert.equal(JSON.parse(run(['--audit-links', '--json', root]).stdout).issues.filter((entry) => entry.code === 'dangling-link').length, 1);
 });
+
+test('crosslink never suggests a derivation its own tails and head', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const manifestPath = path.join(root, '.derivon/workspace.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.graph.hyperedges.push({ id: 'h-loop', weight: 1, tails: ['agent', 'tool'], head: 'loop', data: { document: 'docs/h-loop' } });
+  await writeFile(manifestPath, JSON.stringify(manifest));
+  await mkdir(path.join(root, 'docs/h-loop'), { recursive: true });
+  await writeFile(path.join(root, 'docs/h-loop/document.md'), '# Agent, Tool Layer ⟶ Agent Loop\n\nAn Agent calls the Tool Layer, which gives the Agent Loop; a Skill helps.\n');
+  const report = JSON.parse(run(['--json', root, 'h-loop']).stdout);
+  assert.deepEqual(report.suggestions.map((entry) => entry.id), ['h-loop:skill']);
+});
