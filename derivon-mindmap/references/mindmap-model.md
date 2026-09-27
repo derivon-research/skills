@@ -15,7 +15,12 @@ learning and explanation. These meanings belong to Mindmap, not to the core CLI.
   only when understanding the problem is independently learnable and reusable.
 - Distinct responses to the same pressure may fan out to different heads.
   Parallel hyperedges share tails and head but remain distinct because their
-  argument, source, explanation, or audience cost differs.
+  argument, explanation, or audience cost differs.
+- Motivation is a tail. The concepts in which a derivation's problem pressure
+  arises are tails, like the concepts its move uses; a definition or claim given
+  with no pressure has only the concepts its statement uses. Two derivations with
+  the same tails and head that make the same move are one derivation with one
+  weight, whichever sources give it.
 - An empty-tail hyperedge is a real entrance only when its head is learnable
   without graph prerequisites. It still has a weight and is not a substitute for
   a route query's learner-known start set.
@@ -121,7 +126,9 @@ every tail is mastered.
 The scale is continuous, not an enum. Start with integers or halves. Use tenths
 only after comparison or observed evidence. Review weights at or above 4 for a
 hidden reusable intermediate, but do not split a difficult atomic move merely to
-lower its number. Importance, page count, tail count, and head difficulty are not
+lower its number. A step that is pure symbol manipulation, with no intuition for
+why it works, is weighted by how hard it is to understand, not by how short it
+is. Importance, page count, tail count, and head difficulty are not
 weight formulas.
 
 Book Import and Creation freeze a target audience and estimate consistently for
