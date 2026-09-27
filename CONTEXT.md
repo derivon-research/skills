@@ -17,8 +17,12 @@ One complete problem-led explanatory step that exposes problem pressure in the j
 _Avoid_: Relation, transition, connection, multi-stage historical survey
 
 **Memorisation derivation**:
-A derivation for a claim the source states without an argument, or a definition it gives without motivation where it is given, so the learner can only commit it to memory. Its tails are exactly the concepts the statement uses, and its weight is one memorisation cost fixed for the whole import.
+A derivation for a definition the source gives without motivation where it is given, or for a claim whose long argument the source deliberately omits and which is hard to see intuitively, so the learner can only commit it to memory. Its tails are exactly the concepts the statement uses, and its weight is one memorisation cost fixed for the whole import. The real argument, or the later motivation, is a separate derivation beside it.
 _Avoid_: Empty entrance, fill-in proof, derivation the source skipped
+
+**Supplement**:
+A derivation the importer constructs rather than takes from the source: *asserted* when the source states the claim without an argument (counted in the source's route), *gap* when the source silently relies on a claim it never states (not counted).
+_Avoid_: Source derivation, correction
 
 **Concept document**:
 The learner-facing statement and scope of one concept. It may state a result, but does not justify that result from graph prerequisites.

@@ -22,16 +22,26 @@ continue from, then inspect source citations and existing graph content.
 ## Run one chapter transaction
 
 1. Read the complete current chapter and the existing canonical point registry.
-2. Extract reusable concepts, exact definitions/scope, genuine arguments or
-   constructions, complete prerequisites, examples, meaning-bearing figures,
-   source locations, and uncertainty.
+2. Inventory **all general content** of the body text: definitions, theorems,
+   corollaries, properties, conclusions stated in remarks, general results proved
+   inside worked examples, generalisations left to the reader, and every name the
+   source uses as a concept (a *component* of a vector, a *natural basis*). Leave
+   out purely numerical worked examples and exercises. The aim is a faithful record
+   of the whole source, because later comparisons use routes (syllabi, other
+   books, solver targets) that reach parts this source's own route skips; "nothing
+   downstream uses it" is therefore no reason to leave an item out. For each item
+   extract exact definitions/scope, genuine arguments or constructions, complete
+   prerequisites, meaning-bearing figures, source locations, and uncertainty. The
+   inventory is complete when every item of the chapter is matched to a point and
+   to the source's derivation of it, or reported as deliberately left out.
 3. Reconcile identity by meaning, not labels. Do not let a previous composite
    point become canonical merely because it already exists.
 4. Form an edge only when the source supplies a real step by which all tails
    jointly support one head. An argument the source gives inside a worked example
    is such a step. Chapter order, adjacent sections, citation, chronology,
    similarity, and co-occurrence are not derivations. What the source only
-   asserts becomes a memorisation derivation, as described below.
+   asserts, and a definition it motivates only later, are handled as described
+   below.
 5. Read the existing derivations with the same head before adding one, and decide
    between **reuse** and a **parallel** hyperedge:
    - The source reuses an existing derivation when that derivation makes the
@@ -61,31 +71,74 @@ continue from, then inspect source citations and existing graph content.
 
 ## Record what the source only asserts
 
-A claim the source states without an argument ("the proof is omitted", "left to
-the reader", "it can be shown") and a definition it gives without motivation still
-enter the graph, each as a **memorisation derivation**. A definition whose reason
-appears only in a later section counts as unmotivated where it is given. Give the
-memorisation derivation exactly the concepts its statement uses as tails, so a
-memorised result never bypasses the terms it is stated in, and the frozen
-memorisation weight. Its document says in a sentence what the source gives and
-what it leaves out.
+Judge an assertion by its content, never by its marker word ("obviously", "it is
+easy to verify", "similarly", "the proof is omitted", "left to the reader", "one
+may conjecture"). First construct the real derivation, or find the one already in
+the graph, then place it in one of three **tiers**:
 
-Motivation is a tail. Before adding a memorisation derivation, read the existing
-derivations with the same head:
+| Tier | When | Graph |
+| --- | --- | --- |
+| High | the source deliberately omits a long argument that is hard to see intuitively | keep a memorisation derivation (tails: the terms of the statement; the frozen memorisation weight) **and** add the real derivation at its real cost |
+| Mid-high | the claim is strongly intuitive but the omitted argument is long | one derivation with the concepts the real argument uses as tails, weight 3 |
+| Actual | strongly intuitive and the argument really is short | one derivation with the real tails at its actual cost |
 
-- When another source motivates the same definition or claim from some concept,
-  that concept is a tail of that derivation. If the earlier import left it out,
-  propose adding it.
-- When one with the same tails makes the same unmotivated move, it is the same
-  derivation. Propose keeping one, at the memorisation weight.
-- When one with the same tails argues the claim, the source reuses it (step 5)
-  and nothing is memorised: an argument already in the graph is what the learner
-  pays for, however briefly the source states the claim. A one-line check from a
-  definition, such as (Aᵀ)ᵀ = A, stays at the argued weight.
+Examples from one textbook import: associativity of the matrix product was
+motivated by composing substitutions but the double-sum exchange was left out, so
+it is mid-high, 3; "multiplying a row multiplies the determinant" is read straight
+off the defining formula, so it is actual, 1; uniqueness of the reduced row echelon
+form, which the book only says "one may conjecture", is mid-high, 3, argued
+through equal solution sets.
 
-The first two are revisions of earlier work; confirm them first. Afterwards,
-derivations with the same tails and head are one derivation, never two that differ
-only in how generously a source was read.
+When the real derivation has the same tails and head as one already in the graph,
+the source reuses that one (step 5): the learner pays for the argument that exists,
+however briefly the source states the claim. Derivations with the same tails and
+head are one derivation.
+
+Some statements are argued even though the text looks terse, and get an ordinary
+derivation at the argued weight:
+
+- "similarly" when the given argument transfers verbatim;
+- a general method demonstrated on a worked example (an example that shows only the
+  answer is not an argument);
+- a conclusion an earlier theorem gives directly, even when the source does not
+  cite it.
+
+When the source gives two arguments for one claim, both derivations enter the
+graph, and the source's route counts only the main proof.
+
+### Keep your supplements apart
+
+A derivation you construct is not the source's. List it apart from the source's
+derivations, in one of two groups:
+
+- **Supplied, asserted**: the source states the claim and asks the learner to
+  accept it here. Count it in the source's route. The mid-high and actual tiers
+  above land here.
+- **Supplied, gap**: the source silently relies on a claim it never states, such as
+  "all maximal independent subsets have the same size" behind "the rank of a vector
+  set". Model the claim honestly and leave the source's route broken there; do not
+  count the supplement.
+
+### Definitions motivated later
+
+A definition given without motivation where it appears gets two derivations:
+
+- a memorisation derivation, with the terms of the definition as tails;
+- a motivated derivation, with the concepts that raise the motivation as tails, so
+  a solver can rebuild a motivation-first teaching order.
+
+When a later section of the source supplies the motivation, the motivated
+derivation belongs to that section of the source's route. For example, the sign
+(−1)^{i+j} of a cofactor is explained by the proof that moves an entry to the
+corner. When the source never supplies it, mark the motivated derivation as your
+addition. Motivation given in the same paragraph, right after the definition,
+counts as motivation.
+
+Motivation is a tail. When another source motivates the same definition from some
+concept that its derivation lacks, propose adding that tail. When another source
+makes the same unmotivated move, treat it the same way: a memorisation derivation
+with its own terms, plus the motivated one. Both are revisions of earlier work;
+confirm them first.
 
 ## Preserve meaning-bearing figures
 
