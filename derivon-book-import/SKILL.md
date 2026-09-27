@@ -12,7 +12,7 @@ table of contents into graph edges.
 ## Freeze the import
 
 Record the source, authorization, target audience, covered chapters, language,
-and whether this is a new or existing workspace. User-provided, owned, or
+the memorisation weight, and whether this is a new or existing workspace. User-provided, owned, or
 authorized material may be reused directly. For other public sources, use bounded
 quotation and faithful adaptation with exact provenance.
 
@@ -28,8 +28,10 @@ continue from, then inspect source citations and existing graph content.
 3. Reconcile identity by meaning, not labels. Do not let a previous composite
    point become canonical merely because it already exists.
 4. Form an edge only when the source supplies a real step by which all tails
-   jointly support one head. Chapter order, adjacent sections, citation,
-   chronology, similarity, and co-occurrence are not derivations.
+   jointly support one head. An argument the source gives inside a worked example
+   is such a step. Chapter order, adjacent sections, citation, chronology,
+   similarity, and co-occurrence are not derivations. What the source only
+   asserts becomes a memorisation derivation, as described below.
 5. Preserve distinct source arguments as parallel hyperedges. Split reusable
    intermediate results rather than hiding them inside a large edge.
 6. Calibrate each whole-step weight for the frozen audience using the Mindmap
@@ -47,6 +49,30 @@ continue from, then inspect source citations and existing graph content.
    inserted-reference change for this chapter.
 9. Continue automatically. Pause only when evidence cannot settle a semantic
    ambiguity or when a destructive revision of prior work needs confirmation.
+
+## Record what the source only asserts
+
+A claim the source states without an argument ("the proof is omitted", "left to
+the reader", "it can be shown") and a definition it gives without motivation still
+enter the graph, each as a **memorisation derivation**. A definition whose reason
+appears only in a later section counts as unmotivated where it is given. Give the
+memorisation derivation exactly the concepts its statement uses as tails, so a
+memorised result never bypasses the terms it is stated in, and the frozen
+memorisation weight. Its document says in a sentence what the source gives and
+what it leaves out.
+
+Motivation is a tail. Before adding a memorisation derivation, read the existing
+derivations with the same head:
+
+- When another source motivates the same definition or claim from some concept,
+  that concept is a tail of that derivation. If the earlier import left it out,
+  propose adding it.
+- When one with the same tails makes the same unmotivated move, it is the same
+  derivation. Propose keeping one, at the memorisation weight.
+
+Both are revisions of earlier work; confirm them first. Afterwards, derivations
+with the same tails and head differ in their argument, never only in how
+generously a source was read.
 
 ## Preserve meaning-bearing figures
 

@@ -16,6 +16,10 @@ _Avoid_: Topic introduction, historical adjacency, generic motivation, mandatory
 One complete problem-led explanatory step that exposes problem pressure in the jointly required concepts, performs one identifiable resolving move, and establishes one resulting concept.
 _Avoid_: Relation, transition, connection, multi-stage historical survey
 
+**Memorisation derivation**:
+A derivation for a claim the source states without an argument, or a definition it gives without motivation where it is given, so the learner can only commit it to memory. Its tails are exactly the concepts the statement uses, and its weight is one memorisation cost fixed for the whole import.
+_Avoid_: Empty entrance, fill-in proof, derivation the source skipped
+
 **Concept document**:
 The learner-facing statement and scope of one concept. It may state a result, but does not justify that result from graph prerequisites.
 _Avoid_: Proof document, derivation summary
