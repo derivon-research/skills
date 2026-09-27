@@ -594,7 +594,7 @@ async function runDeleteObject({ argv, context }) {
       return { issues: [issue(CODE.GRAPH_INVALID, '.', `derivon returned no usable graph: ${error.message}`)] };
     }
   }
-  const committed = await commitManifest(context, { ...context.manifest, graph }, { objects: ids, documents: [] });
+  const committed = await commitManifest(context, { ...context.manifest, graph: inManifestOrder(context.manifest, graph) }, { objects: ids, documents: [] });
   if (committed.issues?.length) return committed;
   return { ...committed, result: { documents, note: 'document directories are never deleted' } };
 }
@@ -980,11 +980,20 @@ function assertNoArguments(argv) {
   if (argv.length) throw new UsageError(`Unexpected argument: ${argv[0]}`);
 }
 
+// derivon writes hyperedges before points. Keep whichever order the manifest already has,
+// so adding one object does not rewrite the whole file.
 function graphOf(manifest) {
-  return {
-    points: Array.isArray(manifest?.graph?.points) ? manifest.graph.points : [],
-    hyperedges: Array.isArray(manifest?.graph?.hyperedges) ? manifest.graph.hyperedges : [],
-  };
+  const graph = manifest?.graph ?? {};
+  return inManifestOrder(manifest, {
+    points: Array.isArray(graph.points) ? graph.points : [],
+    hyperedges: Array.isArray(graph.hyperedges) ? graph.hyperedges : [],
+  });
+}
+
+function inManifestOrder(manifest, { points, hyperedges }) {
+  const keys = Object.keys(manifest?.graph ?? {});
+  const pointsFirst = keys.includes('points') && keys.includes('hyperedges') && keys.indexOf('points') < keys.indexOf('hyperedges');
+  return pointsFirst ? { points, hyperedges } : { hyperedges, points };
 }
 
 function findObject(manifest, id) {
