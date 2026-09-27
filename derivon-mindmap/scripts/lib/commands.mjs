@@ -127,13 +127,16 @@ export const COMMANDS = [
     name: 'new-object-id',
     artifact: 'workspace',
     capability: 'read',
-    summary: 'Mint an object id in the same shape the application generates.',
+    summary: 'Mint a new object\'s id and document directory by the application\'s rule; use both as given.',
     argv: [
       { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' },
       { name: 'kind', flag: '--kind', kind: 'string', required: false, values: ['concept', 'derivation'], description: 'Defaults to concept.' },
     ],
     stdin: null,
-    result: { changed: [], fields: [{ name: 'id', description: 'The minted id.' }] },
+    result: { changed: [], fields: [
+      { name: 'id', description: 'The minted id.' },
+      { name: 'document', description: 'The document directory for this id, as the application would create it: docs/concept-… or docs/derivation-… plus the id without its prefix.' },
+    ] },
     run: runNewObjectId,
   },
   {
@@ -418,7 +421,8 @@ async function runNewObjectId({ argv, context }) {
   if (result.status !== 0) {
     return { issues: [issue(CODE.IO_ERROR, MANIFEST_LABEL, (result.stderr || result.stdout).trim())] };
   }
-  return { result: { id: result.stdout.trim() } };
+  const { id, document } = JSON.parse(result.stdout);
+  return { result: { id, document } };
 }
 
 async function runExportTextbook({ argv, context }) {

@@ -81,7 +81,7 @@ definitions; do not keep a second one.
 - `find-objects` finds the objects a piece of text may mean and returns a ready
   relative link; `crosslink` suggests links for exact-label mentions and writes the
   ones you apply; `render`, `validate` and `export-textbook` are read-only;
-  `new-object-id` mints an id.
+  `new-object-id` mints an id and its document directory, both to use as given.
 - `read-learner-record` / `write-learner-record` read and replace one learner
   record outside the workspace, keyed by the workspace id.
 

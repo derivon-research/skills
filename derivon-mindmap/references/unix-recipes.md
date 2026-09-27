@@ -139,17 +139,19 @@ Query output is not a manifest. Subgraph output is an envelope containing
 
 ## Add a point and document
 
-Object ids are generated, never chosen: the `new-object-id` command mints one in the same
-shape the application does — `c-` or `h-` plus six lowercase characters from an alphabet
-without `0 1 i l o u`, random so a deleted id is never handed out again. Ids need only be
-unique inside one graph.
+Object ids and document directories are generated, never chosen or composed: the
+`new-object-id` command mints both by the application's rule — an id of `c-` or `h-` plus six
+lowercase characters from an alphabet without `0 1 i l o u`, random so a deleted id is never
+handed out again, and the directory that goes with it. Use `.result.document` as given; do not
+build a directory from the id. Ids need only be unique inside one graph.
 
 `add-concept` writes the document and commits the graph object that owns it in one
 call. Mint the id through the command surface too:
 
 ```sh
-ID=$($CMD new-object-id "$ROOT" --kind concept | jq -r '.result.id')
-DOC="docs/concept-${ID#c-}"
+NEW=$($CMD new-object-id "$ROOT" --kind concept)
+ID=$(printf '%s' "$NEW" | jq -r '.result.id')
+DOC=$(printf '%s' "$NEW" | jq -r '.result.document')
 MARKDOWN=$(mktemp)
 trap 'rm -f "$MARKDOWN"' 0 1 2 15
 printf '%s\n' '# Limit' '' 'Source-grounded definition, scope, and example.' > "$MARKDOWN"
@@ -174,8 +176,9 @@ Read every tail, the proposed derivation source, and the head together. Every ta
 must contribute; distinct arguments become parallel hyperedges.
 
 ```sh
-ID=$($CMD new-object-id "$ROOT" --kind derivation | jq -r '.result.id')
-DOC="docs/derivation-${ID#h-}"
+NEW=$($CMD new-object-id "$ROOT" --kind derivation)
+ID=$(printf '%s' "$NEW" | jq -r '.result.id')
+DOC=$(printf '%s' "$NEW" | jq -r '.result.document')
 MARKDOWN=$(mktemp)
 trap 'rm -f "$MARKDOWN"' 0 1 2 15
 printf '%s\n' '# Sum rule for limits' '' \
@@ -196,7 +199,7 @@ takes the tail list as JSON, so an empty tail is `--argjson tails '[]'`.
 ## Apply a related batch
 
 Each `add-*` call is its own commit, so an ordered batch is a sequence of calls
-that each leave the workspace valid:
+that each leave the workspace valid. `$A` holds the id of a concept already in the graph:
 
 ```sh
 B_MD=$(mktemp); E_MD=$(mktemp)
@@ -204,14 +207,15 @@ trap 'rm -f "$B_MD" "$E_MD"' 0 1 2 15
 printf '%s\n' '# B' '' 'Define B.' > "$B_MD"
 printf '%s\n' '# A to B' '' 'Explain how A establishes B.' > "$E_MD"
 
-jq -cn --arg id B --arg label B --arg document docs/b --rawfile markdown "$B_MD" \
-  '{id:$id, data:{label:$label, document:$document}, markdown:$markdown}' \
+B=$($CMD new-object-id "$ROOT" --kind concept)
+jq -cn --argjson new "$B" --arg label B --rawfile markdown "$B_MD" \
+  '{id:$new.result.id, data:{label:$label, document:$new.result.document}, markdown:$markdown}' \
   | $CMD add-concept "$ROOT"
 
-EDGE=$($CMD new-object-id "$ROOT" --kind derivation | jq -r '.result.id')
-jq -cn --arg id "$EDGE" --arg document "docs/derivation-${EDGE#h-}" \
-  --argjson tails '["A"]' --arg head B --argjson weight '1.5' --rawfile markdown "$E_MD" \
-  '{id:$id, tails:$tails, head:$head, weight:$weight, data:{document:$document}, markdown:$markdown}' \
+EDGE=$($CMD new-object-id "$ROOT" --kind derivation)
+jq -cn --argjson new "$EDGE" --argjson b "$B" --arg a "$A" \
+  --argjson weight '1.5' --rawfile markdown "$E_MD" \
+  '{id:$new.result.id, tails:[$a], head:$b.result.id, weight:$weight, data:{document:$new.result.document}, markdown:$markdown}' \
   | $CMD add-derivation "$ROOT"
 rm -f "$B_MD" "$E_MD"
 trap - 0 1 2 15

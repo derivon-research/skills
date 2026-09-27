@@ -125,6 +125,27 @@ test('capabilities is the single command manifest and every declared command run
   }
 });
 
+test('new-object-id mints the id and the document directory the application would create', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  for (const [kind, prefix] of [['concept', 'c'], ['derivation', 'h']]) {
+    const { result } = JSON.parse(run(['new-object-id', root, '--kind', kind]).stdout);
+    assert.match(result.id, new RegExp(`^${prefix}-[23456789abcdefghjkmnpqrstvwxyz]{6}$`));
+    assert.equal(result.document, `docs/${kind}-${result.id.slice(2)}`);
+  }
+
+  // A directory already on disk is never handed out; the next free suffix is.
+  await mkdir(path.join(root, 'docs/concept-222222'), { recursive: true });
+  const occupied = spawnSync(process.execPath, ['-e', `
+    const crypto = require('node:crypto');
+    crypto.randomInt = () => 0;
+    process.argv = [process.argv[0], ${JSON.stringify(path.join(repo, 'derivon-mindmap/scripts/new-object-id.mjs'))},
+      '--manifest', ${JSON.stringify(path.join(root, '.derivon/workspace.json'))}, '--kind', 'concept'];
+    import(process.argv[1]);
+  `], { encoding: 'utf8' });
+  assert.deepEqual(JSON.parse(occupied.stdout), { id: 'c-222222', document: 'docs/concept-222222-2' });
+});
+
 test('usage errors and unknown objects use their own exit codes and codes', async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
