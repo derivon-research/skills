@@ -52,9 +52,9 @@ export const COMMANDS = [
     result: { changed: [], fields: [
       { name: 'concepts', description: 'Concept count.' },
       { name: 'derivations', description: 'Derivation count.' },
-      { name: 'labelReviews', description: 'Open label advisories, each { id, label, check, message }: check coordination (the label contains 与, 和, 及, 、, 并且, and, & or list punctuation) or length (wider than the 8 units the canvas shows; a CJK character is 1, others 0.5). Advisories are not issues and never change status or exit code. Resolve each one: split the point, shorten the label to a handle with the statement in data.description, or acknowledge it with review-label.' },
+      { name: 'labelReviews', description: 'Open label advisories, each { id, label, check, message }: check coordination (the label contains 与, 和, 及, 、, 并且, and, & or list punctuation), length (wider than the 8 units the canvas shows; a CJK character is 1, others 0.5), shared-name (other concepts, listed in sharedWith, carry the same label, and this one\'s description is missing or equal to another\'s, or it has no qualifier of its own; shared names are allowed), or qualifier-length (data.qualifier, also in the entry, is wider than 8 units). Advisories are not issues and never change status or exit code. Resolve each one: split the point, shorten the label or qualifier, write the difference into data.description and data.qualifier, or acknowledge it with review-label.' },
       { name: 'acknowledgedLabelReviews', description: 'Advisories silenced by .derivon/label-review.json.' },
-      { name: 'staleLabelReviews', description: 'Acknowledgements that silence nothing because the point is gone or its label changed; the next review-label prunes them.' },
+      { name: 'staleLabelReviews', description: 'Acknowledgements that silence nothing because the point is gone or its label (for qualifier-length, its qualifier) changed; the next review-label prunes them.' },
     ] },
     run: runValidate,
   },
@@ -62,12 +62,12 @@ export const COMMANDS = [
     name: 'review-label',
     artifact: 'workspace',
     capability: 'write-structure',
-    summary: 'Acknowledge label advisories that validate reports, recording the current label and a reason in .derivon/label-review.json; renaming the point re-opens the review.',
+    summary: 'Acknowledge label advisories that validate reports, recording the current label (and for qualifier-length the qualifier) and a reason in .derivon/label-review.json; renaming the point re-opens the review.',
     argv: [{ name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' }],
-    stdin: { required: true, schema: 'derivon.label-review-request/v1', description: '{ entries: [{ id, check, reason }] } — check is coordination or length; reason says why this label stays after considering a split and a shorter handle. Every entry must name an existing concept whose advisory is open now, or nothing is written.' },
+    stdin: { required: true, schema: 'derivon.label-review-request/v1', description: '{ entries: [{ id, check, reason }] } — check is coordination, length, shared-name or qualifier-length; reason says why the concept stays as it is after considering the advisory\'s remedies. Every entry must name an existing concept whose advisory is open now, or nothing is written.' },
     result: { changed: [], fields: [
       { name: 'file', description: 'The record written, .derivon/label-review.json.' },
-      { name: 'recorded', description: 'The acknowledgements this call wrote: id, label, check.' },
+      { name: 'recorded', description: 'The acknowledgements this call wrote: id, label, check, and qualifier for qualifier-length.' },
       { name: 'pruned', description: 'Stale acknowledgements removed.' },
       { name: 'entries', description: 'Acknowledgements in the record after the write.' },
     ] },
@@ -90,7 +90,7 @@ export const COMMANDS = [
     name: 'crosslink',
     artifact: 'workspace',
     capability: 'write-document',
-    summary: 'Suggest links for the first exact-label mention of each concept in the selected documents, and write only the suggestions named by --apply. A link the author wrote to another target is kept.',
+    summary: 'Suggest links for the first exact-label mention of each concept in the selected documents, and write only the suggestions named by --apply. A label several concepts share yields one suggestion per concept; apply the one the text means. A link the author wrote to another target is kept.',
     argv: [
       { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' },
       { name: 'selectors', positional: true, kind: 'id', required: false, repeatable: true, description: 'Object ids, document directories, or document.md paths.' },
@@ -102,7 +102,7 @@ export const COMMANDS = [
     result: { changed: ['documents'], fields: [
       { name: 'selectedDocuments', description: 'Documents examined.' },
       { name: 'written', description: 'Links written by this call.' },
-      { name: 'suggestions', description: 'Each suggestion: id, source, line, context with the matched text in brackets, targetId, written. Apply one only when its context means that concept.' },
+      { name: 'suggestions', description: 'Each suggestion: id, source, line, context with the matched text in brackets, targetId, written. Apply one only when its context means that concept. When several concepts share the matched label, each of them is its own suggestion at the same place, with shared: true, qualifier, description and alternatives (the other suggestion ids there); apply at most one, the one whose description the context means.' },
       { name: 'kept', description: 'Author links left as written, each suppressing its label in that document.' },
     ] },
     run: runCrosslink,
@@ -120,7 +120,7 @@ export const COMMANDS = [
       { name: 'limit', flag: '--limit', kind: 'number', required: false, description: 'Most candidates to return; default 10.' },
     ],
     stdin: null,
-    result: { changed: [], fields: [{ name: 'candidates', description: 'kind, id, label, detail, document, and link when --from is given.' }] },
+    result: { changed: [], fields: [{ name: 'candidates', description: 'kind, id, label, qualifier (a concept\'s, or null), detail, document, and link when --from is given. Concepts may share a label; tell them apart by qualifier and detail.' }] },
     run: runFindObjects,
   },
   {
@@ -389,7 +389,9 @@ async function runCrosslink({ argv, context }) {
     result: {
       selectedDocuments: value.selectedDocuments ?? 0,
       written: value.writtenCount ?? 0,
-      suggestions: suggestions.map(({ id, source, line, context, targetId, written }) => ({ id, source, line, context, targetId, written })),
+      suggestions: suggestions.map(({ id, source, line, context, targetId, written, shared, qualifier, description, alternatives }) => ({
+        id, source, line, context, targetId, written, ...(shared ? { shared, qualifier, description, alternatives } : {}),
+      })),
       kept: (value.notices ?? []).map(({ source, line, message }) => ({ source, line, message })),
     },
     issues,
@@ -654,13 +656,14 @@ async function runReviewLabel({ argv, context, stdin }) {
     if (typeof reason !== 'string' || !reason.trim()) { issues.push(issue(CODE.INVALID_PAYLOAD, `${at}/reason`, 'expected a non-empty reason why this label stays')); continue; }
     const point = typeof id === 'string' ? points.get(id) : undefined;
     if (!point) { issues.push(issue(CODE.UNKNOWN_OBJECT, `${at}/id`, `no concept ${JSON.stringify(id ?? null)}`)); continue; }
-    if (!advisories.some((advisory) => advisory.id === id && advisory.check === check)) {
+    const advisory = advisories.find((candidate) => candidate.id === id && candidate.check === check);
+    if (!advisory) {
       issues.push(issue(CODE.LABEL_REVIEW_NOT_APPLICABLE, at, `concept ${id} (${JSON.stringify(point.data?.label ?? null)}) raises no ${check} advisory; there is nothing to acknowledge`));
       continue;
     }
     if (seen.has(`${id}\u0000${check}`)) { issues.push(issue(CODE.INVALID_PAYLOAD, at, `duplicate entry for ${id} ${check}`)); continue; }
     seen.add(`${id}\u0000${check}`);
-    recorded.push({ id, label: point.data.label, check, reason: reason.trim() });
+    recorded.push({ id, label: point.data.label, ...(advisory.qualifier === undefined ? {} : { qualifier: advisory.qualifier }), check, reason: reason.trim() });
   }
   if (issues.length) return { issues };
 
@@ -681,7 +684,7 @@ async function runReviewLabel({ argv, context, stdin }) {
   return {
     result: {
       file: LABEL_REVIEW_FILE,
-      recorded: recorded.map(({ id, label, check }) => ({ id, label, check })),
+      recorded: recorded.map(({ reason, ...entry }) => entry),
       pruned: stale,
       entries: entries.length,
     },

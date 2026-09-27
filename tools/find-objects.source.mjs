@@ -8,6 +8,8 @@ import process from 'node:process';
 // exact label, id prefix, label prefix, then fuzzy. This adds each concept's description to the
 // fuzzy terms, because a writer often knows what a concept says before knowing its label.
 // With --from, every candidate carries a ready Markdown link relative to that object's document.
+// Concepts may share a label (derivon-mindmap ADR-0014), so each concept candidate carries its
+// qualifier, and the qualifier is searchable too.
 
 const SCHEMA = 'derivon.object-search/v1';
 const args = process.argv.slice(2);
@@ -38,9 +40,10 @@ const targets = [
     kind: 'concept',
     id: point.id,
     label: point.data?.label ?? point.id,
+    qualifier: typeof point.data?.qualifier === 'string' && point.data.qualifier.trim() ? point.data.qualifier : null,
     detail: point.data?.description ?? '',
     document: point.data?.document,
-    searchTerms: [point.id, point.data?.label ?? '', point.data?.description ?? ''],
+    searchTerms: [point.id, point.data?.label ?? '', point.data?.qualifier ?? '', point.data?.description ?? ''],
   })),
   ...hyperedges.map((edge) => {
     const tailLabels = (edge.tails ?? []).map((id) => labelById.get(id) ?? id);
@@ -67,6 +70,7 @@ const candidates = search(targets, query, limit).map((target) => ({
   kind: target.kind,
   id: target.id,
   label: target.label,
+  ...(target.kind === 'concept' ? { qualifier: target.qualifier } : {}),
   detail: target.detail,
   document: target.document,
   ...(source ? { link: `[${linkText(target)}](${objectDocumentHref(source, target.document)})` } : {}),
@@ -76,7 +80,7 @@ if (json) {
   process.stdout.write(`${JSON.stringify({ schema: SCHEMA, query, from: from ?? null, candidates }, null, 2)}\n`);
 } else {
   for (const candidate of candidates) {
-    console.log(`${candidate.id}\t${candidate.label}\t${candidate.detail}${candidate.link ? `\t${candidate.link}` : ''}`);
+    console.log(`${candidate.id}\t${candidate.label}${candidate.qualifier ? `（${candidate.qualifier}）` : ''}\t${candidate.detail}${candidate.link ? `\t${candidate.link}` : ''}`);
   }
 }
 

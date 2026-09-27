@@ -87,6 +87,26 @@ test('validator accepts a complete workspace and reports authoring errors', asyn
   assert.ok(result.issues.some((entry) => entry.path === '/graph/points/2/data/tags/1'));
 });
 
+test('validator accepts a string qualifier on a concept and refuses any other', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const manifestPath = path.join(root, '.derivon/workspace.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.graph.points[2].data.qualifier = '三条性质';
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const accepted = run(validator, ['--json', root]);
+  assert.equal(accepted.status, 0, accepted.stdout);
+
+  manifest.graph.points[2].data.qualifier = 3;
+  manifest.graph.hyperedges[0].data.qualifier = 'not here';
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+  const refused = run(validator, ['--json', root]);
+  assert.equal(refused.status, 1);
+  const issues = JSON.parse(refused.stdout).issues;
+  assert.ok(issues.some((entry) => entry.path === '/graph/points/2/data/qualifier' && entry.code === 'schema-invalid' && entry.message === 'expected string'), JSON.stringify(issues));
+  assert.ok(issues.some((entry) => entry.path === '/graph/hyperedges/0/data/qualifier' && entry.message === 'unknown field'), 'a derivation carries no qualifier');
+});
+
 test('validator refuses a schema string it does not know and a manifest carrying view', async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
@@ -284,6 +304,35 @@ test('exporter rewrites object links and copies recursive reference closure with
   const bounded = run(exporter, [root, '--output', path.join(root, 'bounded'), '--start', 'A', '--start', 'B', '--target', 'C', '--max-references', '0']);
   assert.equal(bounded.status, 1);
   assert.match(bounded.stderr, /exceeds --max-references 0/);
+});
+
+test('exporter shows what tells a shared name apart beside its title, and nothing beside a unique one', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const manifestPath = path.join(root, '.derivon/workspace.json');
+  const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
+  manifest.graph.points[0].data = { ...manifest.graph.points[0].data, label: '行列式', qualifier: '三条性质' };
+  manifest.graph.points[1].data = { ...manifest.graph.points[1].data, label: '行列式', description: '交错多重线性形式' };
+  manifest.graph.points[2].data = { ...manifest.graph.points[2].data, qualifier: '单独的名字' };
+  await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
+
+  const output = path.join(root, 'shared-textbook');
+  const exported = run(exporter, [root, '--output', output, '--start', 'A', '--start', 'B', '--target', 'C']);
+  assert.equal(exported.status, 0, exported.stderr);
+  const route = JSON.parse(await readFile(path.join(output, 'route.json'), 'utf8'));
+  assert.deepEqual(route.chapters.map(({ id, title, distinction }) => ({ id, title, distinction })), [
+    { id: 'A', title: '行列式', distinction: '三条性质' },
+    { id: 'B', title: '行列式', distinction: '交错多重线性形式' },
+    { id: 'h-main', title: 'A + B -> C', distinction: undefined },
+    { id: 'C', title: 'C', distinction: undefined },
+  ], 'the qualifier, else the description, and only for a shared name');
+  const contents = await readFile(path.join(output, 'index.html'), 'utf8');
+  assert.match(contents, /<a href="objects\/A\/index\.html">行列式 <span class="derivon-distinction">三条性质<\/span><\/a>/);
+  assert.match(contents, /<a href="objects\/B\/index\.html">行列式 <span class="derivon-distinction">交错多重线性形式<\/span><\/a>/);
+  assert.match(contents, /<a href="objects\/C\/index\.html">C<\/a>/);
+  const derivation = await readFile(path.join(output, 'objects/h-main/index.html'), 'utf8');
+  assert.match(derivation, /<a href="\.\.\/A\/index\.html">行列式 <span class="derivon-distinction">三条性质<\/span><\/a>/);
+  assert.match(await readFile(path.join(output, 'objects/A/index.html'), 'utf8'), /<title>行列式（三条性质）<\/title>/);
 });
 
 test('exporter requires explicit opt-in for a budget-limited route', async (t) => {

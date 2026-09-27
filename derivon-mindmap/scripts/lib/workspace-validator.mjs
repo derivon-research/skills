@@ -137,7 +137,7 @@ function checkConceptTags(tags, location, add) {
 async function checkDocument(root, realRoot, object, kind, location, owners, add) {
   const data = object?.data;
   const required = kind === 'concept' ? ['label', 'document'] : ['document'];
-  const fields = kind === 'concept' ? [...required, 'description', 'tags'] : [...required, 'label', 'description'];
+  const fields = kind === 'concept' ? [...required, 'description', 'qualifier', 'tags'] : [...required, 'label', 'description'];
   checkObject(data, `${location}/data`, fields, required, add);
   if (kind === 'concept') checkConceptTags(data?.tags, `${location}/data/tags`, add);
   if (typeof data?.label !== 'string' && (kind === 'concept' || data?.label !== undefined)) {
@@ -145,6 +145,9 @@ async function checkDocument(root, realRoot, object, kind, location, owners, add
   }
   if (data?.description !== undefined && typeof data.description !== 'string') {
     add(`${location}/data/description`, 'expected string', CODE.SCHEMA_INVALID);
+  }
+  if (data?.qualifier !== undefined && typeof data.qualifier !== 'string') {
+    add(`${location}/data/qualifier`, 'expected string', CODE.SCHEMA_INVALID);
   }
   if (!safeRelativeDirectory(data?.document)) {
     add(`${location}/data/document`, 'expected a safe workspace-relative directory', CODE.DOCUMENT_UNSAFE);

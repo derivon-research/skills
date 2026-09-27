@@ -96,7 +96,9 @@ links and the scripts check them:
    the first exact-label mention of each concept not yet linked, each with an `id`
    and a `context` that brackets the matched text. Run it again with `--apply <id>`
    for each suggestion whose context means that concept. A label cut out of a longer
-   word, or used in another sense, stays unapplied.
+   word, or used in another sense, stays unapplied. When several concepts share the
+   label, each is a suggestion at the same mention (`shared: true`) with its
+   `qualifier` and `description`; apply the one the context means, or none.
 3. When a word means a concept other than the one its exact label names, write that
    link yourself. `crosslink` keeps it and stops suggesting the label in that
    document.

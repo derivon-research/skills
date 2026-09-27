@@ -10305,6 +10305,7 @@ if (takeFlag("--help") || takeFlag("-h")) {
   node crosslink-documents.mjs --audit-links [--json] [--manifest <candidate.json>] <workspace>
 
 A suggestion is the first exact-label mention of a concept in one document, with id <document-object-id>:<concept-id>.
+When several concepts share the label, each gets its own suggestion at that mention; apply at most one.
 --write writes the suggestions named by --apply and nothing else.
 --audit-links reports links to files that do not exist in the workspace.`);
   process.exit(0);
@@ -10377,6 +10378,13 @@ for (const id of applyIds) {
   if (!suggestionIds.has(id)) blockers.push({ objectId: id.split(":")[0], source: ".", line: 1, code: "unknown-suggestion", message: `${id} is not a pending suggestion in the selected documents` });
 }
 var chosen = (entry) => applyIds.has(entry.id);
+var chosenAt = /* @__PURE__ */ new Map();
+for (const entry of suggestions.filter(chosen)) {
+  const place = `${entry.source}\0${entry.start}`;
+  const other = chosenAt.get(place);
+  if (other) blockers.push({ objectId: entry.objectId, source: entry.source, line: entry.line, code: "conflicting-suggestions", message: `${other} and ${entry.id} link the same mention; apply only the concept the text means` });
+  else chosenAt.set(place, entry.id);
+}
 if (blockers.length) {
   emitReport({ blockers, suggestions, written: [] });
   process.exitCode = 1;
@@ -10510,6 +10518,7 @@ function resolveInsertions({ source, object, relativeSource, analysis, labels: l
   const candidates = [];
   const validLinks = /* @__PURE__ */ new Map();
   const keptTargets = /* @__PURE__ */ new Set();
+  const keptLabels = /* @__PURE__ */ new Set();
   for (const link of analysis.links) {
     const target = resolveObjectHref(`${object.data.document}/${"document.md"}`, link.href, targetByDocument2);
     if (target?.kind === "concept") {
@@ -10526,13 +10535,19 @@ function resolveInsertions({ source, object, relativeSource, analysis, labels: l
         keptTargets.add(targets[0].id);
         notices2.push(issue(object, relativeSource, link.line, "kept-author-link", `${label} stays linked to ${link.href}; ${targets[0].id} is not linked in this document`));
       }
+      if (targets.length > 1 && !keptLabels.has(label)) {
+        keptLabels.add(label);
+        if (!targets.some((point3) => point3.id === target?.id)) {
+          notices2.push(issue(object, relativeSource, link.line, "kept-author-link", `${label} stays linked to ${link.href}; ${targets.map((point3) => point3.id).join(", ")} are not linked in this document`));
+        }
+      }
     }
   }
   const terms = labels2.map((label) => ({ label, targets: pointGroups2.get(label) }));
   for (const block of analysis.blocks) {
     for (const group of block.groups) {
       for (const { label, targets } of terms) {
-        const occupyOnly = targets.length === 1 && targets[0].id === object.id;
+        const occupyOnly = targets.some((point3) => point3.id === object.id);
         let from = 0;
         for (; ; ) {
           const index2 = findLabel(group.text, label, from);
@@ -10554,30 +10569,43 @@ function resolveInsertions({ source, object, relativeSource, analysis, labels: l
     if (!firstByLabel.has(candidate.label)) firstByLabel.set(candidate.label, candidate);
   }
   const insertions = [];
+  const suggest = (candidate, point3, extra = {}) => insertions.push({
+    id: `${object.id}:${point3.id}`,
+    objectId: object.id,
+    source: relativeSource,
+    line: candidate.line,
+    start: candidate.start,
+    end: candidate.end,
+    display: source.slice(candidate.start, candidate.end),
+    context: contextAround(source, candidate.start, candidate.end),
+    targetId: point3.id,
+    href: relativeObjectHref(`${object.data.document}/${"document.md"}`, point3.data.document),
+    ...extra
+  });
+  const linkedBefore = (point3, candidate) => {
+    const existing = validLinks.get(point3.id);
+    return existing !== void 0 && existing <= candidate.start;
+  };
   for (const [label, candidate] of firstByLabel) {
     if (candidate.targets.length > 1) {
-      issues.push(issue(object, relativeSource, candidate.line, "ambiguous-label", `${label} matches ${candidate.targets.map((target) => target.id).join(", ")}`));
+      if (keptLabels.has(label) || candidate.targets.some((point4) => linkedBefore(point4, candidate))) continue;
+      const ids = candidate.targets.map((point4) => `${object.id}:${point4.id}`);
+      for (const point4 of candidate.targets) {
+        suggest(candidate, point4, {
+          shared: true,
+          qualifier: typeof point4.data.qualifier === "string" && point4.data.qualifier.trim() ? point4.data.qualifier : null,
+          description: typeof point4.data.description === "string" ? point4.data.description : null,
+          alternatives: ids.filter((id) => id !== `${object.id}:${point4.id}`)
+        });
+      }
       continue;
     }
     const point3 = candidate.targets[0];
     if (keptTargets.has(point3.id)) continue;
-    const existing = validLinks.get(point3.id);
-    if (existing !== void 0 && existing <= candidate.start) continue;
-    const href = relativeObjectHref(`${object.data.document}/${"document.md"}`, point3.data.document);
-    insertions.push({
-      id: `${object.id}:${point3.id}`,
-      objectId: object.id,
-      source: relativeSource,
-      line: candidate.line,
-      start: candidate.start,
-      end: candidate.end,
-      display: source.slice(candidate.start, candidate.end),
-      context: contextAround(source, candidate.start, candidate.end),
-      targetId: point3.id,
-      href
-    });
+    if (linkedBefore(point3, candidate)) continue;
+    suggest(candidate, point3);
   }
-  return { objectId: object.id, source: relativeSource, insertions: insertions.sort((a, b) => a.start - b.start), issues, notices: notices2 };
+  return { objectId: object.id, source: relativeSource, insertions: insertions.sort((a, b) => a.start - b.start || a.targetId.localeCompare(b.targetId)), issues, notices: notices2 };
 }
 function contextAround(source, start, end, width = 8) {
   const clean = (value) => value.replace(/\s+/g, " ");
@@ -10688,7 +10716,8 @@ function emitReport({ blockers: issues, suggestions: suggestions2, written }) {
     return;
   }
   for (const entry of report.suggestions) {
-    console.log(`${entry.written ? "Linked" : "Suggested"} ${entry.id} ${entry.source}:${entry.line} ${entry.context}`);
+    const shared = entry.shared ? ` (shared name; ${[entry.qualifier, entry.description].filter(Boolean).join(": ") || "no qualifier or description"})` : "";
+    console.log(`${entry.written ? "Linked" : "Suggested"} ${entry.id} ${entry.source}:${entry.line} ${entry.context}${shared}`);
   }
   for (const entry of issues) console.error(`Crosslink error [${entry.objectId}] ${entry.source}:${entry.line} ${entry.code}: ${entry.message}`);
   for (const entry of notices) console.log(`Kept [${entry.objectId}] ${entry.source}:${entry.line} ${entry.message}`);

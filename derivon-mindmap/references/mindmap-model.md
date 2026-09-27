@@ -59,22 +59,40 @@ of about 8 CJK characters and cuts the rest. Keep it at most 8 units wide, count
 a CJK or fullwidth character as 1 and any other character as 0.5. A proposition is
 still one point, since tails and heads can only be points, but its full statement
 goes in `data.description` and the first sentence of its concept document. Use the
-conventional name when one exists (`秩–零化度定理`). Otherwise coin a handle that
-no other label uses and that does not read as a definition: `零空间维数公式`, not
-`零空间维数`, for "the null space has dimension n − r".
+name the subject uses (`秩–零化度定理`). When there is none, coin a handle that does
+not read as a definition: `零空间维数公式`, not `零空间维数`, for "the null space has
+dimension n − r".
+
+**Names may repeat.** When one name covers several definitions or cases, such as
+the determinant by three properties and by alternating forms, each definition is
+its own concept, and all of them carry the subject's name. The id tells nothing
+apart: it is an opaque identity. The concept's own fields do that:
+
+- `data.description` says which definition or case this concept is and how it
+  differs from the others with the same name.
+- `data.qualifier`, optional, is a few characters (`三条性质`, `交错型`) shown under
+  the name on the canvas and after it in lists. Keep it within the same 8 units.
+  Any concept may have one.
+
+A derivation that proves one definition from another is an ordinary hyperedge; each
+proved direction is its own. See derivon-mindmap ADR-0014.
 
 `validate` checks every concept label and lists what needs review in
 `result.labelReviews`: `coordination` for a coordination signal, `length` for a
-label wider than 8. These advisories never fail validation, and a batch is done
-only when each one is resolved, in this order:
+label wider than 8, `shared-name` for a shared name whose description or qualifier
+does not yet tell this concept apart, and `qualifier-length` for a qualifier wider
+than 8. These advisories never fail validation, and a batch is done only when each
+one is resolved, in this order:
 
 1. **Split** the point when its parts can be defined, derived, or referenced
    independently, and model their actual relation.
-2. **Shorten** the label to a handle and move the statement into
-   `data.description` and the document's first sentence.
-3. **Acknowledge** with `review-label` and a reason only when the label must stay
+2. **Shorten** the label or qualifier, moving the statement into
+   `data.description` and the document's first sentence. For `shared-name`, keep
+   the name and write the difference into the description and a qualifier instead.
+3. **Acknowledge** with `review-label` and a reason only when the concept must stay
    as it is, such as a conventional coordinated term. The record keeps the exact
-   label, so a rename puts it up for review again.
+   label, and for `qualifier-length` the qualifier, so a change puts it up for
+   review again.
 
 A hyperedge must expose reusable intermediate results instead of hiding several
 substantial moves in one step. It contains one problem pressure and one

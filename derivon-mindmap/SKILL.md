@@ -166,7 +166,7 @@ Link the changed documents as the
 says, then run `render` for them and `validate` over the workspace. Resolve every
 entry in `validate`'s `result.labelReviews` as the
 [Mindmap model](references/mindmap-model.md#atomic-concepts-and-steps) says:
-split, shorten, or acknowledge with a reason.
+split, shorten, tell shared names apart, or acknowledge with a reason.
 
 Preserve Markdown and its inline HTML verbatim outside the requested edits. Follow the
 central object-document contract for every learner-visible source. Use native

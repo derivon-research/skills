@@ -56,7 +56,7 @@ export const CODE = {
   ROUTE_UNREACHABLE: 'route-unreachable',
   ROUTE_NOT_OPTIMAL: 'route-not-optimal',
   CROSSLINK_UNKNOWN_SUGGESTION: 'unknown-suggestion',
-  CROSSLINK_AMBIGUOUS: 'ambiguous-label',
+  CROSSLINK_CONFLICTING: 'conflicting-suggestions',
   CROSSLINK_MISSING_SOURCE: 'missing-source',
   CROSSLINK_PARSE_ERROR: 'parse-error',
   DANGLING_LINK: 'dangling-link',

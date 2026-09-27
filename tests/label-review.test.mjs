@@ -138,6 +138,8 @@ test('a malformed label-review record is a validate error', async (t) => {
     ['{not json', ''],
     [JSON.stringify({ schema: 'derivon.label-review/v1', entries: [{ id: 'long', label: LABELS.long, check: 'width', reason: 'x' }] }), '/entries/0/check'],
     [JSON.stringify({ schema: 'derivon.label-review/v1', entries: [{ id: 'long', label: LABELS.long, check: 'length', reason: ' ' }] }), '/entries/0/reason'],
+    [JSON.stringify({ schema: 'derivon.label-review/v1', entries: [{ id: 'long', label: LABELS.long, check: 'qualifier-length', reason: 'x' }] }), '/entries/0/qualifier'],
+    [JSON.stringify({ schema: 'derivon.label-review/v1', entries: [{ id: 'long', label: LABELS.long, qualifier: 'q', check: 'length', reason: 'x' }] }), '/entries/0/qualifier'],
   ]) {
     await writeFile(file, content);
     const { status, envelope } = surface(['validate', root]);
@@ -173,4 +175,107 @@ test('review-label refuses an unknown id or an advisory that does not apply, and
     assert.ok(envelope.issues.some((entry) => entry.code === code), `${JSON.stringify(entries)}: ${JSON.stringify(envelope.issues)}`);
     await assert.rejects(readFile(file), { code: 'ENOENT' }, 'a refused batch writes nothing');
   }
+});
+
+async function withNamesakes(root, namesakes) {
+  const file = path.join(root, '.derivon/workspace.json');
+  const manifest = JSON.parse(await readFile(file, 'utf8'));
+  for (const [id, data] of Object.entries(namesakes)) {
+    await mkdir(path.join(root, 'docs', id), { recursive: true });
+    await writeFile(path.join(root, 'docs', id, 'document.md'), `# ${data.label}\n\nGrounded.\n`);
+    const existing = manifest.graph.points.find((point) => point.id === id);
+    if (existing) existing.data = { ...data, document: `docs/${id}` };
+    else manifest.graph.points.push({ id, data: { ...data, document: `docs/${id}` } });
+  }
+  await writeFile(file, `${JSON.stringify(manifest, null, 2)}\n`);
+}
+
+test('shared names are advised until descriptions and qualifiers tell the concepts apart', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+
+  await withNamesakes(root, { 'det-a': { label: '行列式' }, 'det-b': { label: '行列式' } });
+  let validated = surface(['validate', root]);
+  assert.equal(validated.status, 0, 'a shared name is never an error');
+  assert.deepEqual(validated.envelope.issues, []);
+  let shared = validated.envelope.result.labelReviews.filter((entry) => entry.check === 'shared-name');
+  assert.deepEqual(shared.map((entry) => entry.id).sort(), ['det-a', 'det-b']);
+  const first = shared.find((entry) => entry.id === 'det-a');
+  assert.deepEqual(first.sharedWith, ['det-b']);
+  assert.match(first.message, /ADR-0014/);
+  assert.match(first.message, /data\.description/);
+  assert.match(first.message, /data\.qualifier/);
+  assert.match(first.message, /no description and it has no qualifier/);
+
+  await withNamesakes(root, {
+    'det-a': { label: '行列式', description: '由三条性质刻画的行列式。', qualifier: '三条性质' },
+    'det-b': { label: '行列式', description: '由三条性质刻画的行列式。', qualifier: '三条性质' },
+  });
+  shared = surface(['validate', root]).envelope.result.labelReviews.filter((entry) => entry.check === 'shared-name');
+  assert.equal(shared.length, 2, 'equal descriptions and equal qualifiers still tell nothing apart');
+  assert.match(shared[0].message, /description is the same as another's and its qualifier is the same as another's/);
+
+  await withNamesakes(root, {
+    'det-a': { label: '行列式', description: '由三条性质刻画的行列式。', qualifier: '三条性质' },
+    'det-b': { label: '行列式', description: '用交错多重线性形式定义的行列式，与三条性质的定义等价。', qualifier: '交错型' },
+  });
+  validated = surface(['validate', root]).envelope;
+  assert.deepEqual(reviews(validated), ['bundle:coordination', 'long:length'], 'distinct descriptions and qualifiers resolve it');
+});
+
+test('a shared-name advisory can be acknowledged, and a rename re-opens it', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await withNamesakes(root, {
+    'poly-a': { label: '特征多项式', description: 'det(A − λI)。' },
+    'poly-b': { label: '特征多项式', description: 'det(zI − T)。' },
+  });
+  let validated = surface(['validate', root]).envelope;
+  assert.deepEqual(reviews(validated).filter((entry) => entry.includes('shared-name')), ['poly-a:shared-name', 'poly-b:shared-name'], 'no qualifier is still advised');
+
+  const written = surface(['review-label', root], JSON.stringify({
+    entries: [
+      { id: 'poly-a', check: 'shared-name', reason: 'The descriptions already say which determinant each is.' },
+      { id: 'poly-b', check: 'shared-name', reason: 'The descriptions already say which determinant each is.' },
+    ],
+  }));
+  assert.equal(written.status, 0, JSON.stringify(written.envelope.issues));
+  validated = surface(['validate', root]).envelope;
+  assert.deepEqual(reviews(validated), ['bundle:coordination', 'long:length']);
+  assert.equal(validated.result.acknowledgedLabelReviews, 2);
+
+  await rename(root, 'poly-b', '特征多项式');
+  assert.equal(surface(['validate', root]).envelope.result.acknowledgedLabelReviews, 2, 'an unchanged label keeps the acknowledgement');
+  await rename(root, 'poly-a', '多项式');
+  await rename(root, 'poly-b', '多项式');
+  validated = surface(['validate', root]).envelope;
+  assert.deepEqual(reviews(validated).filter((entry) => entry.includes('shared-name')), ['poly-a:shared-name', 'poly-b:shared-name'], 'a rename re-opens it');
+  assert.equal(validated.result.staleLabelReviews, 2);
+});
+
+test('a qualifier wider than the canvas is advised and its acknowledgement follows the qualifier', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const wide = '用交错多重线性形式定义';
+  await withNamesakes(root, { short: { label: LABELS.short, qualifier: wide } });
+  let validated = surface(['validate', root]).envelope;
+  const advisory = validated.result.labelReviews.find((entry) => entry.check === 'qualifier-length');
+  assert.equal(advisory.id, 'short');
+  assert.equal(advisory.qualifier, wide);
+  assert.equal(advisory.width, 11);
+
+  const written = surface(['review-label', root], JSON.stringify({ entries: [{ id: 'short', check: 'qualifier-length', reason: 'Test-only acknowledgement.' }] }));
+  assert.equal(written.status, 0, JSON.stringify(written.envelope.issues));
+  assert.deepEqual(written.envelope.result.recorded, [{ id: 'short', label: LABELS.short, qualifier: wide, check: 'qualifier-length' }]);
+  validated = surface(['validate', root]).envelope;
+  assert.ok(!validated.result.labelReviews.some((entry) => entry.check === 'qualifier-length'));
+
+  await withNamesakes(root, { short: { label: LABELS.short, qualifier: `${wide}的那一种` } });
+  validated = surface(['validate', root]).envelope;
+  assert.ok(validated.result.labelReviews.some((entry) => entry.check === 'qualifier-length'), 'a changed qualifier re-opens it');
+  assert.equal(validated.result.staleLabelReviews, 1);
+
+  await withNamesakes(root, { short: { label: LABELS.short, qualifier: '交错型' } });
+  validated = surface(['validate', root]).envelope;
+  assert.ok(!validated.result.labelReviews.some((entry) => entry.check === 'qualifier-length'), 'a short qualifier needs nothing');
 });

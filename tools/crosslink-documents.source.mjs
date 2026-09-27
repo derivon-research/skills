@@ -23,6 +23,7 @@ if (takeFlag('--help') || takeFlag('-h')) {
   node crosslink-documents.mjs --audit-links [--json] [--manifest <candidate.json>] <workspace>
 
 A suggestion is the first exact-label mention of a concept in one document, with id <document-object-id>:<concept-id>.
+When several concepts share the label, each gets its own suggestion at that mention; apply at most one.
 --write writes the suggestions named by --apply and nothing else.
 --audit-links reports links to files that do not exist in the workspace.`);
   process.exit(0);
@@ -97,6 +98,13 @@ for (const id of applyIds) {
   if (!suggestionIds.has(id)) blockers.push({ objectId: id.split(':')[0], source: '.', line: 1, code: 'unknown-suggestion', message: `${id} is not a pending suggestion in the selected documents` });
 }
 const chosen = (entry) => applyIds.has(entry.id);
+const chosenAt = new Map();
+for (const entry of suggestions.filter(chosen)) {
+  const place = `${entry.source}\u0000${entry.start}`;
+  const other = chosenAt.get(place);
+  if (other) blockers.push({ objectId: entry.objectId, source: entry.source, line: entry.line, code: 'conflicting-suggestions', message: `${other} and ${entry.id} link the same mention; apply only the concept the text means` });
+  else chosenAt.set(place, entry.id);
+}
 if (blockers.length) {
   emitReport({ blockers, suggestions, written: [] });
   process.exitCode = 1;
@@ -300,6 +308,7 @@ function resolveInsertions({ source, object, relativeSource, analysis, labels, p
   const candidates = [];
   const validLinks = new Map();
   const keptTargets = new Set();
+  const keptLabels = new Set();
   for (const link of analysis.links) {
     const target = resolveObjectHref(`${object.data.document}/${'document.md'}`, link.href, targetByDocument);
     if (target?.kind === 'concept') {
@@ -316,13 +325,23 @@ function resolveInsertions({ source, object, relativeSource, analysis, labels, p
         keptTargets.add(targets[0].id);
         notices.push(issue(object, relativeSource, link.line, 'kept-author-link', `${label} stays linked to ${link.href}; ${targets[0].id} is not linked in this document`));
       }
+      // A shared label the author already linked, to one of its concepts or elsewhere, is settled
+      // in this document: the author chose which concept the text means.
+      if (targets.length > 1 && !keptLabels.has(label)) {
+        keptLabels.add(label);
+        if (!targets.some((point) => point.id === target?.id)) {
+          notices.push(issue(object, relativeSource, link.line, 'kept-author-link', `${label} stays linked to ${link.href}; ${targets.map((point) => point.id).join(', ')} are not linked in this document`));
+        }
+      }
     }
   }
   const terms = labels.map((label) => ({ label, targets: pointGroups.get(label) }));
   for (const block of analysis.blocks) {
     for (const group of block.groups) {
       for (const { label, targets } of terms) {
-        const occupyOnly = targets.length === 1 && targets[0].id === object.id;
+        // The object's own label occupies its span and is never linked, also when other concepts
+        // share it: in its own document the name most likely means the object itself.
+        const occupyOnly = targets.some((point) => point.id === object.id);
         let from = 0;
         for (;;) {
           const index = findLabel(group.text, label, from);
@@ -346,30 +365,45 @@ function resolveInsertions({ source, object, relativeSource, analysis, labels, p
     if (!firstByLabel.has(candidate.label)) firstByLabel.set(candidate.label, candidate);
   }
   const insertions = [];
+  const suggest = (candidate, point, extra = {}) => insertions.push({
+    id: `${object.id}:${point.id}`,
+    objectId: object.id,
+    source: relativeSource,
+    line: candidate.line,
+    start: candidate.start,
+    end: candidate.end,
+    display: source.slice(candidate.start, candidate.end),
+    context: contextAround(source, candidate.start, candidate.end),
+    targetId: point.id,
+    href: relativeObjectHref(`${object.data.document}/${'document.md'}`, point.data.document),
+    ...extra,
+  });
+  const linkedBefore = (point, candidate) => {
+    const existing = validLinks.get(point.id);
+    return existing !== undefined && existing <= candidate.start;
+  };
   for (const [label, candidate] of firstByLabel) {
     if (candidate.targets.length > 1) {
-      issues.push(issue(object, relativeSource, candidate.line, 'ambiguous-label', `${label} matches ${candidate.targets.map((target) => target.id).join(', ')}`));
+      // Several concepts share this name (derivon-mindmap ADR-0014). Offer each of them at this
+      // mention with what tells them apart, and let the author apply the one the text means.
+      if (keptLabels.has(label) || candidate.targets.some((point) => linkedBefore(point, candidate))) continue;
+      const ids = candidate.targets.map((point) => `${object.id}:${point.id}`);
+      for (const point of candidate.targets) {
+        suggest(candidate, point, {
+          shared: true,
+          qualifier: typeof point.data.qualifier === 'string' && point.data.qualifier.trim() ? point.data.qualifier : null,
+          description: typeof point.data.description === 'string' ? point.data.description : null,
+          alternatives: ids.filter((id) => id !== `${object.id}:${point.id}`),
+        });
+      }
       continue;
     }
     const point = candidate.targets[0];
     if (keptTargets.has(point.id)) continue;
-    const existing = validLinks.get(point.id);
-    if (existing !== undefined && existing <= candidate.start) continue;
-    const href = relativeObjectHref(`${object.data.document}/${'document.md'}`, point.data.document);
-    insertions.push({
-      id: `${object.id}:${point.id}`,
-      objectId: object.id,
-      source: relativeSource,
-      line: candidate.line,
-      start: candidate.start,
-      end: candidate.end,
-      display: source.slice(candidate.start, candidate.end),
-      context: contextAround(source, candidate.start, candidate.end),
-      targetId: point.id,
-      href,
-    });
+    if (linkedBefore(point, candidate)) continue;
+    suggest(candidate, point);
   }
-  return { objectId: object.id, source: relativeSource, insertions: insertions.sort((a, b) => a.start - b.start), issues, notices };
+  return { objectId: object.id, source: relativeSource, insertions: insertions.sort((a, b) => a.start - b.start || a.targetId.localeCompare(b.targetId)), issues, notices };
 }
 
 // The visible neighbourhood of an insertion, so a reviewer can see whether the label was cut out
@@ -503,7 +537,8 @@ function emitReport({ blockers: issues, suggestions, written }) {
     return;
   }
   for (const entry of report.suggestions) {
-    console.log(`${entry.written ? 'Linked' : 'Suggested'} ${entry.id} ${entry.source}:${entry.line} ${entry.context}`);
+    const shared = entry.shared ? ` (shared name; ${[entry.qualifier, entry.description].filter(Boolean).join(': ') || 'no qualifier or description'})` : '';
+    console.log(`${entry.written ? 'Linked' : 'Suggested'} ${entry.id} ${entry.source}:${entry.line} ${entry.context}${shared}`);
   }
   for (const entry of issues) console.error(`Crosslink error [${entry.objectId}] ${entry.source}:${entry.line} ${entry.code}: ${entry.message}`);
   for (const entry of notices) console.log(`Kept [${entry.objectId}] ${entry.source}:${entry.line} ${entry.message}`);

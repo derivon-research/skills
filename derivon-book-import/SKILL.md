@@ -81,9 +81,10 @@ headings and theorem statements are rarely usable labels: a heading often lists
 several concepts, and a theorem statement is a proposition. Split a list into
 points the source defines separately. Give a proposition the book's name for it,
 or a coined handle, and put the statement in `data.description` and the
-document's first sentence. Resolve every `validate` label advisory before the
-chapter is complete; acknowledge one with `review-label` only when the source
-supports one indivisible understanding under that exact name.
+document's first sentence. When the book gives one name several definitions, each
+is its own point under that name, told apart by description and qualifier. Resolve
+every `validate` label advisory before the chapter is complete; acknowledge one
+with `review-label` only for a reason the source supports.
 
 ## Revise earlier chapters carefully
 

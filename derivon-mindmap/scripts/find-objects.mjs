@@ -1579,9 +1579,10 @@ var targets = [
     kind: "concept",
     id: point.id,
     label: point.data?.label ?? point.id,
+    qualifier: typeof point.data?.qualifier === "string" && point.data.qualifier.trim() ? point.data.qualifier : null,
     detail: point.data?.description ?? "",
     document: point.data?.document,
-    searchTerms: [point.id, point.data?.label ?? "", point.data?.description ?? ""]
+    searchTerms: [point.id, point.data?.label ?? "", point.data?.qualifier ?? "", point.data?.description ?? ""]
   })),
   ...hyperedges.map((edge) => {
     const tailLabels = (edge.tails ?? []).map((id) => labelById.get(id) ?? id);
@@ -1606,6 +1607,7 @@ var candidates = search2(targets, query, limit).map((target) => ({
   kind: target.kind,
   id: target.id,
   label: target.label,
+  ...target.kind === "concept" ? { qualifier: target.qualifier } : {},
   detail: target.detail,
   document: target.document,
   ...source ? { link: `[${linkText(target)}](${objectDocumentHref(source, target.document)})` } : {}
@@ -1615,7 +1617,7 @@ if (json) {
 `);
 } else {
   for (const candidate of candidates) {
-    console.log(`${candidate.id}	${candidate.label}	${candidate.detail}${candidate.link ? `	${candidate.link}` : ""}`);
+    console.log(`${candidate.id}	${candidate.label}${candidate.qualifier ? `\uFF08${candidate.qualifier}\uFF09` : ""}	${candidate.detail}${candidate.link ? `	${candidate.link}` : ""}`);
   }
 }
 function search2(values, text, max) {

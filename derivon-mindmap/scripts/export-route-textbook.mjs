@@ -29413,6 +29413,8 @@ if (!route.provenOptimal && !allowApproximate) fail("Route is not proven optimal
 var pointById = new Map(graph.points.map((point) => [point.id, { ...point, kind: "concept" }]));
 var edgeById = new Map(graph.hyperedges.map((edge) => [edge.id, { ...edge, kind: "derivation" }]));
 var objectById = new Map([...pointById, ...edgeById]);
+var labelCounts = /* @__PURE__ */ new Map();
+for (const point of graph.points) labelCounts.set(point.data?.label, (labelCounts.get(point.data?.label) ?? 0) + 1);
 var objectByPublication = new Map([...objectById.values()].map((object) => [normalizeWorkspacePath(`${object.data.document}/document.md`), object]));
 var sequence = [];
 failure.chapters = sequence;
@@ -29446,7 +29448,7 @@ for (let cursor = 0; cursor < queue.length; cursor += 1) {
     fail(`Missing document for ${object.kind} ${object.id}: ${path3.relative(workspaceRoot, sourceIndex)}`, 1, "document-missing");
   }
   await auditDocumentMediaOrFail({ markdown, objectId: object.id, sourcePath: `${object.data.document}/document.md`, objectDirectory: source });
-  const html = renderDocument(markdown, object.data.label || object.id);
+  const html = renderDocument(markdown, object.kind === "concept" ? plainTitle(object.data.label || object.id, distinctionOf(object)) : object.data.label || object.id);
   sourceById.set(object.id, source);
   htmlById.set(object.id, html);
   const links = knownObjectLinks(html, object, objectByPublication);
@@ -29529,13 +29531,29 @@ function addPoint(id, role) {
   sequence.push(entryFor(point, role));
 }
 function entryFor(object, role) {
+  const distinction = object.kind === "concept" ? distinctionOf(object) : null;
   return {
     id: object.id,
     kind: object.kind,
     role,
     title: object.kind === "concept" ? object.data.label : `${object.tails.join(" + ") || noPremises(object.head)} -> ${object.head}`,
+    ...distinction ? { distinction } : {},
     href: `objects/${object.id}/index.html`
   };
+}
+function distinctionOf(point) {
+  if ((labelCounts.get(point.data?.label) ?? 0) < 2) return null;
+  for (const value of [point.data.qualifier, point.data.description]) {
+    if (typeof value === "string" && value.trim()) return value.trim();
+  }
+  return null;
+}
+function plainTitle(title, distinction) {
+  if (!distinction) return title;
+  return new RegExp("\\p{Script=Han}", "u").test(title) ? `${title}\uFF08${distinction}\uFF09` : `${title} (${distinction})`;
+}
+function titleHtml(title, distinction) {
+  return `${escapeHtml2(title)}${distinction ? ` <span class="derivon-distinction">${escapeHtml2(distinction)}</span>` : ""}`;
 }
 async function prepareStage(output, overwrite) {
   try {
@@ -29628,11 +29646,12 @@ function visitHtml(node, visitor) {
 function endpointLine(object, exportedIds) {
   if (object?.kind !== "derivation") return "";
   const item = (id) => {
-    const label = escapeHtml2(pointById.get(id)?.data?.label || id);
+    const point = pointById.get(id);
+    const label = titleHtml(point?.data?.label || id, point ? distinctionOf(point) : null);
     return exportedIds.has(id) ? `<a href="../${encodeURIComponent(id)}/index.html">${label}</a>` : `<span>${label}</span>`;
   };
   const tails = object.tails.length ? object.tails.map(item).join('<span class="derivon-plus"> + </span>') : `<span class="derivon-no-premises">${escapeHtml2(noPremises(object.head))}</span>`;
-  return `<p class="derivon-endpoints" aria-label="Tails and head">${tails}<span class="derivon-arrow"> \u2192 </span>${item(object.head)}</p><style>.derivon-endpoints{max-width:820px;margin:0 auto 20px;font:15px/1.6 system-ui,sans-serif}.derivon-endpoints a{color:#245f72}.derivon-endpoints .derivon-plus,.derivon-endpoints .derivon-arrow,.derivon-endpoints .derivon-no-premises{color:#68716c}</style>`;
+  return `<p class="derivon-endpoints" aria-label="Tails and head">${tails}<span class="derivon-arrow"> \u2192 </span>${item(object.head)}</p><style>.derivon-endpoints{max-width:820px;margin:0 auto 20px;font:15px/1.6 system-ui,sans-serif}.derivon-endpoints a{color:#245f72}.derivon-endpoints .derivon-plus,.derivon-endpoints .derivon-arrow,.derivon-endpoints .derivon-no-premises,.derivon-endpoints .derivon-distinction{color:#68716c}</style>`;
 }
 function noPremises(headId) {
   const label = pointById.get(headId)?.data?.label ?? "";
@@ -29646,17 +29665,17 @@ ${nav}${endpoints}`);
 }
 function injectReferenceNavigation(html, referrer, endpoints = "") {
   if (!/<body(?:\s[^>]*)?>/i.test(html)) fail("Reference publication is not a complete HTML document with a body element.");
-  const back = referrer ? `<a href="../${encodeURIComponent(referrer.id)}/index.html">Referenced from ${escapeHtml2(referrer.title)}</a>` : "";
+  const back = referrer ? `<a href="../${encodeURIComponent(referrer.id)}/index.html">Referenced from ${escapeHtml2(plainTitle(referrer.title, referrer.distinction))}</a>` : "";
   const nav = `<nav class="derivon-textbook-nav" aria-label="Reference navigation"><a href="../../index.html">Contents</a>${back}</nav><style>.derivon-textbook-nav{position:relative;display:flex;gap:12px;flex-wrap:wrap;max-width:820px;margin:0 auto 20px;padding:12px 0;border-bottom:1px solid #d5d8d3;font:14px/1.4 system-ui,sans-serif}.derivon-textbook-nav a{color:#245f72}</style>`;
   return html.replace(/<body(\s[^>]*)?>/i, (match) => `${match}
 ${nav}${endpoints}`);
 }
 function textbookIndex(manifestValue, routeValue, chapters, references2) {
   const warning = routeValue.provenOptimal ? "" : '<p class="warning"><strong>Warning:</strong> this route was not proven optimal.</p>';
-  const items = chapters.map((chapter, index) => `<li><span>${index + 1}</span><a href="${escapeHtml2(chapter.href)}">${escapeHtml2(chapter.title)}</a><small>${escapeHtml2(chapter.kind)} / ${escapeHtml2(chapter.role)}</small></li>`).join("\n");
-  const referenceItems = references2.map((reference) => `<li><span>R</span><a href="${escapeHtml2(reference.href)}">${escapeHtml2(reference.title)}</a><small>${escapeHtml2(reference.kind)}</small></li>`).join("\n");
+  const items = chapters.map((chapter, index) => `<li><span>${index + 1}</span><a href="${escapeHtml2(chapter.href)}">${titleHtml(chapter.title, chapter.distinction)}</a><small>${escapeHtml2(chapter.kind)} / ${escapeHtml2(chapter.role)}</small></li>`).join("\n");
+  const referenceItems = references2.map((reference) => `<li><span>R</span><a href="${escapeHtml2(reference.href)}">${titleHtml(reference.title, reference.distinction)}</a><small>${escapeHtml2(reference.kind)}</small></li>`).join("\n");
   const referenceSection = references2.length ? `<h2>References</h2><ol>${referenceItems}</ol>` : "";
-  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml2(manifestValue.document.title)} - Route Textbook</title><style>:root{font-family:Inter,system-ui,sans-serif;color:#202422;background:#fff}body{max-width:900px;margin:auto;padding:32px;line-height:1.6}h1{line-height:1.2}dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px}dt{font-weight:700}dd{margin:0}.warning{padding:12px;border-left:4px solid #a44f3f;background:#fff4f1}ol{padding:0;list-style:none;border-top:1px solid #d5d8d3}li{display:grid;grid-template-columns:32px 1fr auto;gap:12px;padding:12px 0;border-bottom:1px solid #d5d8d3}a{color:#245f72}small{color:#68716c}@media(max-width:560px){body{padding:18px}dl{grid-template-columns:1fr}li{grid-template-columns:28px 1fr}small{grid-column:2}}</style></head><body><h1>${escapeHtml2(manifestValue.document.title)}</h1><p>${escapeHtml2(manifestValue.document.description)}</p>${warning}<dl><dt>Starts</dt><dd>${escapeHtml2(routeValue.startPointIds.join(", ") || "none")}</dd><dt>Targets</dt><dd>${escapeHtml2(routeValue.targetPointIds.join(", "))}</dd><dt>Cost</dt><dd>${escapeHtml2(routeValue.cost)}</dd><dt>Optimal</dt><dd>${routeValue.provenOptimal ? "proven" : "not proven"}</dd></dl><h2>Learning sequence</h2><ol>${items}</ol>${referenceSection}</body></html>
+  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml2(manifestValue.document.title)} - Route Textbook</title><style>:root{font-family:Inter,system-ui,sans-serif;color:#202422;background:#fff}body{max-width:900px;margin:auto;padding:32px;line-height:1.6}h1{line-height:1.2}dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px}dt{font-weight:700}dd{margin:0}.warning{padding:12px;border-left:4px solid #a44f3f;background:#fff4f1}ol{padding:0;list-style:none;border-top:1px solid #d5d8d3}li{display:grid;grid-template-columns:32px 1fr auto;gap:12px;padding:12px 0;border-bottom:1px solid #d5d8d3}a{color:#245f72}small,.derivon-distinction{color:#68716c}@media(max-width:560px){body{padding:18px}dl{grid-template-columns:1fr}li{grid-template-columns:28px 1fr}small{grid-column:2}}</style></head><body><h1>${escapeHtml2(manifestValue.document.title)}</h1><p>${escapeHtml2(manifestValue.document.description)}</p>${warning}<dl><dt>Starts</dt><dd>${escapeHtml2(routeValue.startPointIds.join(", ") || "none")}</dd><dt>Targets</dt><dd>${escapeHtml2(routeValue.targetPointIds.join(", "))}</dd><dt>Cost</dt><dd>${escapeHtml2(routeValue.cost)}</dd><dt>Optimal</dt><dd>${routeValue.provenOptimal ? "proven" : "not proven"}</dd></dl><h2>Learning sequence</h2><ol>${items}</ol>${referenceSection}</body></html>
 `;
 }
 async function serveDirectory(root, requestedPort) {
