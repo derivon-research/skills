@@ -422,6 +422,30 @@ test('find-objects ranks exact matches first and hands back a ready relative lin
   assert.equal(run(['find-objects', root]).status, 2);
 });
 
+test('concepts sharing a name reach find-objects and crosslink with their qualifiers', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const added = run(['add-concept', root], JSON.stringify({ id: 'B2', data: { label: 'Beta', qualifier: 'second', description: 'The other Beta.', document: 'docs/b2' }, markdown: '# Beta\n\nThe other one.\n' }));
+  assert.equal(added.status, 0, added.stdout);
+  const tagged = run(['set-metadata', root], JSON.stringify({ objects: { B: { data: { label: 'Beta', qualifier: 'first', description: 'The first Beta.', document: 'docs/b' } } } }));
+  assert.equal(tagged.status, 0, tagged.stdout);
+  assert.equal(JSON.parse(run(['validate', root]).stdout).result.labelReviews.length, 0);
+
+  const found = JSON.parse(run(['find-objects', root, 'Beta']).stdout);
+  assert.deepEqual(found.result.candidates.slice(0, 2).map(({ id, qualifier }) => ({ id, qualifier })), [{ id: 'B', qualifier: 'first' }, { id: 'B2', qualifier: 'second' }]);
+  assert.equal(JSON.parse(run(['find-objects', root, 'second']).stdout).result.candidates[0].id, 'B2', 'the qualifier is searchable');
+
+  await writeFile(path.join(root, 'docs/a/document.md'), '# Alpha\n\nAlpha precedes Beta.\n');
+  const checked = JSON.parse(run(['crosslink', root, 'A', '--check']).stdout);
+  assert.deepEqual(checked.result.suggestions.map(({ id, shared, qualifier, alternatives }) => ({ id, shared, qualifier, alternatives })), [
+    { id: 'A:B', shared: true, qualifier: 'first', alternatives: ['A:B2'] },
+    { id: 'A:B2', shared: true, qualifier: 'second', alternatives: ['A:B'] },
+  ]);
+  const applied = JSON.parse(run(['crosslink', root, 'A', '--apply', 'A:B2']).stdout);
+  assert.equal(applied.result.written, 1);
+  assert.equal(await readFile(path.join(root, 'docs/a/document.md'), 'utf8'), '# Alpha\n\nAlpha precedes [Beta](../b2/document.md).\n');
+});
+
 test('render and export-textbook return the envelope and coded diagnostics', async (t) => {
   const root = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));

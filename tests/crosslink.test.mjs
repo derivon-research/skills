@@ -108,21 +108,60 @@ test('crosslink lets an object own label occupy its span in its own document', a
   assert.match(await readFile(loopPath, 'utf8'), /An Agent Loop repeats\. A lone \[Agent\]\(\.\.\/concept-agent\/document\.md\) calls it\./);
 });
 
-test('crosslink detects encountered duplicate labels but ignores unused duplicates', async (t) => {
-  const root = await fixture();
-  t.after(() => rm(root, { recursive: true, force: true }));
+async function addNamesake(root) {
   const manifestPath = path.join(root, '.derivon/workspace.json');
   const manifest = JSON.parse(await readFile(manifestPath, 'utf8'));
-  manifest.graph.points.push({ id: 'loop-2', data: { label: 'Agent Loop', document: 'docs/loop-2' } });
+  manifest.graph.points.find((point) => point.id === 'loop').data.qualifier = 'single';
+  manifest.graph.points.find((point) => point.id === 'loop').data.description = 'One agent repeating tool calls.';
+  manifest.graph.points.push({ id: 'loop-2', data: { label: 'Agent Loop', qualifier: 'multi', description: 'Several agents taking turns.', document: 'docs/loop-2' } });
   await mkdir(path.join(root, 'docs/loop-2'));
-  await writeFile(path.join(root, 'docs/loop-2/document.md'), '# Other\n');
+  await writeFile(path.join(root, 'docs/loop-2/document.md'), '# Agent Loop\n\nSeveral agents. Agent Loop again.\n');
   await writeFile(manifestPath, `${JSON.stringify(manifest, null, 2)}\n`);
-  await writeFile(path.join(root, 'docs/concept-topic/document.md'), '# Topic\n\nTool Layer only.\n');
-  assert.equal(run(['--write', root, 'topic']).status, 0);
-  await writeFile(path.join(root, 'docs/concept-topic/document.md'), '# Topic\n\nAgent Loop appears.\n');
-  const ambiguous = run(['--write', root, 'topic']);
-  assert.equal(ambiguous.status, 1);
-  assert.match(ambiguous.stderr, /ambiguous-label/);
+}
+
+test('crosslink offers every concept that shares a label at its mention and writes the one applied', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await addNamesake(root);
+  const topicPath = path.join(root, 'docs/concept-topic/document.md');
+  const source = '# Topic\n\nAn Agent Loop appears. Agent Loop again.\n';
+  await writeFile(topicPath, source);
+
+  const checked = run(['--json', root, 'topic']);
+  assert.equal(checked.status, 0, checked.stderr);
+  const report = JSON.parse(checked.stdout);
+  assert.deepEqual(report.issues, [], 'a shared label is not an error');
+  const shared = report.suggestions.filter((entry) => entry.shared);
+  assert.deepEqual(shared.map((entry) => entry.id), ['topic:loop', 'topic:loop-2']);
+  assert.equal(shared[0].line, shared[1].line);
+  assert.equal(shared[0].context, shared[1].context);
+  assert.deepEqual(shared.map(({ qualifier, description, alternatives }) => ({ qualifier, description, alternatives })), [
+    { qualifier: 'single', description: 'One agent repeating tool calls.', alternatives: ['topic:loop-2'] },
+    { qualifier: 'multi', description: 'Several agents taking turns.', alternatives: ['topic:loop'] },
+  ]);
+  assert.ok(!report.suggestions.some((entry) => entry.id === 'topic:agent'), 'a unique label keeps its behaviour');
+
+  const both = run(['--write', '--apply', 'topic:loop', '--apply', 'topic:loop-2', root, 'topic']);
+  assert.equal(both.status, 1);
+  assert.match(both.stderr, /conflicting-suggestions/);
+  assert.equal(await readFile(topicPath, 'utf8'), source, 'nothing is written when two namesakes are applied');
+
+  const written = run(['--write', '--json', '--apply', 'topic:loop-2', root, 'topic']);
+  assert.equal(written.status, 0, written.stderr);
+  assert.deepEqual(JSON.parse(written.stdout).suggestions.filter((entry) => entry.written).map((entry) => entry.id), ['topic:loop-2']);
+  assert.equal(await readFile(topicPath, 'utf8'), '# Topic\n\nAn [Agent Loop](../loop-2/document.md) appears. Agent Loop again.\n');
+
+  const settled = JSON.parse(run(['--json', root, 'topic']).stdout);
+  assert.deepEqual(settled.suggestions.filter((entry) => entry.shared), [], 'a linked shared label is settled in that document');
+});
+
+test('a concept whose name is shared occupies its own name in its own document', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  await addNamesake(root);
+  const report = JSON.parse(run(['--json', root, 'loop-2']).stdout);
+  assert.deepEqual(report.issues, []);
+  assert.deepEqual(report.suggestions, [], 'neither namesake is offered in loop-2\'s own document, and Agent inside Agent Loop is not cut out');
 });
 
 test('crosslink rejects a document source symlink outside the workspace', async (t) => {

@@ -2,21 +2,28 @@
  * Label review: advisories on concept labels, and the companion record that acknowledges them.
  *
  * The Mindmap canvas draws each concept in a fixed box with a one-line label, so a label is a
- * short handle and a proposition's statement belongs in `data.description` and the document. Two
+ * short handle and a proposition's statement belongs in `data.description` and the document. These
  * checks flag labels an Agent must look at again:
  *
  * - `coordination`: the label contains a coordination signal (与, 和, 及, 、, 并且, `and`, `&`,
  *   list punctuation). It may bundle parts that should be separate points.
  * - `length`: the label is wider than the canvas shows.
+ * - `shared-name`: other concepts carry the same label and nothing yet tells this one apart from
+ *   them: its description is missing or equal to another's, or it has no qualifier of its own.
+ *   Shared names are allowed (derivon-mindmap ADR-0014); the advisory asks for the difference to
+ *   be written down, not for a rename.
+ * - `qualifier-length`: the optional `data.qualifier` is wider than the canvas shows, by the same
+ *   rule and limit as `length`.
  *
  * These are advisories, never errors: they do not make a workspace invalid and do not change a
- * command's status or exit code. An advisory is resolved by splitting the point, shortening the
- * label, or recording an acknowledgement with a reason in `.derivon/label-review.json`
- * (`derivon.label-review/v1`). The manifest gets no field for it, like `.derivon/orientation.json`.
+ * command's status or exit code. An advisory is resolved by changing the concept or by recording
+ * an acknowledgement with a reason in `.derivon/label-review.json` (`derivon.label-review/v1`).
+ * The manifest gets no field for it, like `.derivon/orientation.json`.
  *
  * An acknowledgement silences an advisory only while its point exists and carries a label
- * byte-identical to the recorded one, so a rename puts the label up for review again. An entry
- * that silences nothing is stale: validate ignores it and reports the count, and the next
+ * byte-identical to the recorded one, so a rename puts the label up for review again. A
+ * `qualifier-length` entry also records the qualifier, so changing the qualifier re-opens it. An
+ * entry that silences nothing is stale: validate ignores it and reports the count, and the next
  * `review-label` write prunes it. A malformed record is a validate error.
  */
 
@@ -26,7 +33,7 @@ import { CODE, issue } from './envelope.mjs';
 
 export const LABEL_REVIEW_SCHEMA = 'derivon.label-review/v1';
 export const LABEL_REVIEW_FILE = '.derivon/label-review.json';
-export const LABEL_CHECKS = ['coordination', 'length'];
+export const LABEL_CHECKS = ['coordination', 'length', 'shared-name', 'qualifier-length'];
 
 /**
  * The widest label the canvas shows without an ellipsis, in width units.
@@ -106,7 +113,18 @@ export function coordinationSignals(label) {
   return found;
 }
 
-function advisoriesFor(point) {
+/** A concept's qualifier when it has a non-blank one, else null. */
+function qualifierOf(point) {
+  const value = point.data.qualifier;
+  return typeof value === 'string' && value.trim() ? value : null;
+}
+
+function descriptionOf(point) {
+  const value = point.data.description;
+  return typeof value === 'string' && value.trim() ? value.trim() : null;
+}
+
+function advisoriesFor(point, namesakes) {
   const label = point.data.label;
   const found = [];
   const signals = coordinationSignals(label);
@@ -125,8 +143,40 @@ function advisoriesFor(point) {
       label,
       check: 'length',
       width,
-      message: `label is ${width} units wide and the canvas shows ${LABEL_WIDTH_LIMIT} (a CJK or fullwidth character is 1, any other character 0.5). If it bundles parts that can be defined, derived or referenced on their own, split the point. Otherwise shorten it to a noun-like handle: the conventional name when one exists, or a coined one that no other label uses and that does not read as a definition; put the full statement in data.description and the document's first sentence. Only when no shorter handle is recognizable, acknowledge it with review-label and the reason.`,
+      message: `label is ${width} units wide and the canvas shows ${LABEL_WIDTH_LIMIT} (a CJK or fullwidth character is 1, any other character 0.5). If it bundles parts that can be defined, derived or referenced on their own, split the point. Otherwise shorten it to a noun-like handle: the name the subject uses, or a coined one that does not read as a definition; another concept may carry the same name, and a qualifier tells them apart. Put the full statement in data.description and the document's first sentence. Only when no shorter handle is recognizable, acknowledge it with review-label and the reason.`,
     });
+  }
+  const qualifier = qualifierOf(point);
+  if (qualifier !== null) {
+    const qualifierWidth = labelWidth(qualifier);
+    if (qualifierWidth > LABEL_WIDTH_LIMIT) {
+      found.push({
+        id: point.id,
+        label,
+        qualifier,
+        check: 'qualifier-length',
+        width: qualifierWidth,
+        message: `qualifier is ${qualifierWidth} units wide and the canvas shows ${LABEL_WIDTH_LIMIT} under the name (a CJK or fullwidth character is 1, any other character 0.5). Shorten it to the few characters that tell this concept apart from others with the same name, such as the defining approach or the case; the full distinction belongs in data.description. Only when no shorter qualifier is recognizable, acknowledge it with review-label and the reason.`,
+      });
+    }
+  }
+  const others = namesakes.filter((other) => other !== point);
+  if (others.length) {
+    const reasons = [];
+    const description = descriptionOf(point);
+    if (description === null) reasons.push('it has no description');
+    else if (others.some((other) => descriptionOf(other) === description)) reasons.push('its description is the same as another\'s');
+    if (qualifier === null) reasons.push('it has no qualifier');
+    else if (others.some((other) => qualifierOf(other) === qualifier)) reasons.push('its qualifier is the same as another\'s');
+    if (reasons.length) {
+      found.push({
+        id: point.id,
+        label,
+        check: 'shared-name',
+        sharedWith: others.map((other) => other.id),
+        message: `label is shared with ${others.map((other) => other.id).join(', ')}, and ${reasons.join(' and ')}. Shared names are allowed (derivon-mindmap ADR-0014): keep the name the subject uses. Say in data.description which definition or case this concept is and how it differs from the others with this name, and add a short data.qualifier (a few characters, shown under the name) that tells it apart. If the concepts are in fact one understanding, merge them. Only when the difference is already clear, acknowledge it with review-label and the reason.`,
+      });
+    }
   }
   return found;
 }
@@ -135,9 +185,10 @@ function advisoriesFor(point) {
  * a string label are skipped; the workspace validator reports those. */
 export function labelAdvisories(manifest) {
   const points = Array.isArray(manifest?.graph?.points) ? manifest.graph.points : [];
-  return points
-    .filter((point) => typeof point?.id === 'string' && typeof point?.data?.label === 'string')
-    .flatMap(advisoriesFor);
+  const labelled = points.filter((point) => typeof point?.id === 'string' && typeof point?.data?.label === 'string');
+  const byLabel = new Map();
+  for (const point of labelled) byLabel.set(point.data.label, [...(byLabel.get(point.data.label) ?? []), point]);
+  return labelled.flatMap((point) => advisoriesFor(point, byLabel.get(point.data.label)));
 }
 
 /**
@@ -171,10 +222,12 @@ export function parseLabelReview(text) {
       add(at, 'expected an object');
       continue;
     }
-    for (const key of Object.keys(entry)) if (!['id', 'label', 'check', 'reason'].includes(key)) add(`${at}/${key}`, 'unknown field');
+    for (const key of Object.keys(entry)) if (!['id', 'label', 'qualifier', 'check', 'reason'].includes(key)) add(`${at}/${key}`, 'unknown field');
     if (typeof entry.id !== 'string' || !entry.id) add(`${at}/id`, 'expected a point id');
     if (typeof entry.label !== 'string') add(`${at}/label`, 'expected the label as it was reviewed');
     if (!LABEL_CHECKS.includes(entry.check)) add(`${at}/check`, `expected one of ${LABEL_CHECKS.join(', ')}`);
+    if (entry.check === 'qualifier-length' && typeof entry.qualifier !== 'string') add(`${at}/qualifier`, 'expected the qualifier as it was reviewed');
+    if (entry.check !== 'qualifier-length' && entry.qualifier !== undefined) add(`${at}/qualifier`, 'only a qualifier-length entry records a qualifier');
     if (typeof entry.reason !== 'string' || !entry.reason.trim()) add(`${at}/reason`, 'expected a non-empty reason');
     const key = `${entry.id}\u0000${entry.check}`;
     if (seen.has(key)) add(at, `duplicate entry for ${entry.id} ${entry.check}`);
@@ -195,9 +248,11 @@ export async function readLabelReview(root) {
   return { present: true, text, ...parseLabelReview(text) };
 }
 
-/** Does this entry acknowledge this advisory? Same point, same check, byte-identical label. */
+/** Does this entry acknowledge this advisory? Same point, same check, byte-identical label, and
+ * for `qualifier-length` a byte-identical qualifier. */
 function acknowledges(entry, advisory) {
-  return entry.id === advisory.id && entry.check === advisory.check && entry.label === advisory.label;
+  return entry.id === advisory.id && entry.check === advisory.check && entry.label === advisory.label
+    && entry.qualifier === advisory.qualifier;
 }
 
 /**
@@ -228,7 +283,7 @@ export async function auditLabelReview({ root, manifest }) {
 /** Serialize a record the way `review-label` writes it. */
 export function serializeLabelReview(entries) {
   const ordered = [...entries]
-    .map(({ id, label, check, reason }) => ({ id, label, check, reason }))
+    .map(({ id, label, qualifier, check, reason }) => (qualifier === undefined ? { id, label, check, reason } : { id, label, qualifier, check, reason }))
     .sort((left, right) => left.id.localeCompare(right.id) || left.check.localeCompare(right.check));
   return `${JSON.stringify({ schema: LABEL_REVIEW_SCHEMA, entries: ordered }, null, 2)}\n`;
 }
