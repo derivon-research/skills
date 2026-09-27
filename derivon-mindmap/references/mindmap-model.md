@@ -30,10 +30,69 @@ separate relation layer rather than falsifying derivation semantics.
 ## Atomic concepts and steps
 
 A point must not bundle parts that can be defined, learned, derived, referenced,
-or reused independently. Chinese `与`, `和`, `、`, English `and`, list punctuation,
-and other coordination are mandatory review signals. A conventional coordinated
-term stays one point only when evidence supports one indivisible understanding
-state. Shortening a label is not a semantic split.
+or reused independently. Chinese `与`, `和`, `及`, `、`, `并且`, English `and`, list
+punctuation, and other coordination are mandatory review signals. A conventional
+coordinated term stays one point only when evidence supports one indivisible
+understanding state. Shortening a label does not split a bundle.
+
+Coordination words only catch bundles that the label shows. Read the document too,
+and apply these rules:
+
+- **A term that documents use as a concept has its own point.** If an object
+  document relies on an idea, such as "operator" or "algebraic multiplicity", and
+  no point holds it, add the point and its derivation.
+- **A definition point defines one concept.** A second concept introduced in
+  passing is split out: an incidence-matrix point must not also define graph, path
+  and tree.
+- **A definition point asserts no theorem.** A claim stated inside a definition
+  becomes its own point with its own hyperedge.
+- **Split a proposition whose parts have different arguments** when downstream work
+  can use one part alone, even if every current consumer happens to need all parts
+  (the left and right distributive laws). A part with its own derivation and its
+  own downstream use is always split.
+- **Keep a proposition whole** when its parts come from one argument and nothing
+  uses them separately, or when the point has no out-edges at all. Splitting then
+  only adds learning cost; split when a real consumer appears.
+
+A concept label is a short noun-like **handle**, because the canvas shows one line
+of about 8 CJK characters and cuts the rest. Keep it at most 8 units wide, counting
+a CJK or fullwidth character as 1 and any other character as 0.5. A proposition is
+still one point, since tails and heads can only be points, but its full statement
+goes in `data.description` and the first sentence of its concept document. Use the
+name the subject uses (`秩–零化度定理`). When there is none, coin a handle that does
+not read as a definition: `零空间维数公式`, not `零空间维数`, for "the null space has
+dimension n − r".
+
+**Names may repeat.** When one name covers several definitions or cases, such as
+the determinant by three properties and by alternating forms, each definition is
+its own concept, and all of them carry the subject's name. The id tells nothing
+apart: it is an opaque identity. The concept's own fields do that:
+
+- `data.description` says which definition or case this concept is and how it
+  differs from the others with the same name.
+- `data.qualifier`, optional, is a few characters (`三条性质`, `交错型`) shown under
+  the name on the canvas and after it in lists. Keep it within the same 8 units.
+  Any concept may have one.
+
+A derivation that proves one definition from another is an ordinary hyperedge; each
+proved direction is its own. See derivon-mindmap ADR-0014.
+
+`validate` checks every concept label and lists what needs review in
+`result.labelReviews`: `coordination` for a coordination signal, `length` for a
+label wider than 8, `shared-name` for a shared name whose description or qualifier
+does not yet tell this concept apart, and `qualifier-length` for a qualifier wider
+than 8. These advisories never fail validation, and a batch is done only when each
+one is resolved, in this order:
+
+1. **Split** the point when its parts can be defined, derived, or referenced
+   independently, and model their actual relation.
+2. **Shorten** the label or qualifier, moving the statement into
+   `data.description` and the document's first sentence. For `shared-name`, keep
+   the name and write the difference into the description and a qualifier instead.
+3. **Acknowledge** with `review-label` and a reason only when the concept must stay
+   as it is, such as a conventional coordinated term. The record keeps the exact
+   label, and for `qualifier-length` the qualifier, so a change puts it up for
+   review again.
 
 A hyperedge must expose reusable intermediate results instead of hiding several
 substantial moves in one step. It contains one problem pressure and one

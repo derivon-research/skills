@@ -43,8 +43,8 @@ decisions, not facts an Agent can verify.
 6. Commit with the `derivon-mindmap` command surface (`add-concept`,
    `add-derivation`, `set-metadata`, `delete-object`, `import`). Each call builds and
    validates the candidate, writes its document first, and replaces the manifest
-   last, so nothing needs checking first. Then crosslink the exact changed objects,
-   render, and report exact graph, source-document, publication, and
+   last, so nothing needs checking first. Then link the changed documents as the
+   `derivon-mindmap` object-document contract says, render, and report exact graph, source-document, publication, and
    inserted-reference changes.
 7. Audit routes, isolated points, points not used as tails, unresolved identities,
    and evidence that needs a separate relation layer. Propose but do not write the
@@ -52,10 +52,9 @@ decisions, not facts an Agent can verify.
 
 ## Keep concepts atomic
 
-Chinese `与`, `和`, `、`, English `and`, and other coordination force review. If
-parts can be understood, reused, derived, or referenced independently, split them
-and re-evaluate every incident edge. A source heading and a shorter label do not
-prove atomic identity.
+Follow the `derivon-mindmap` model's atomic concepts and label handles, and
+resolve every `validate` label advisory. When you split a point, re-evaluate every
+incident edge. A source heading and a shorter label do not prove atomic identity.
 
 ## Use the document surface
 

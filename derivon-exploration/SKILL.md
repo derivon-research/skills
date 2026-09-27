@@ -58,8 +58,8 @@ start point and remains distinct from the learner-known start set. Keep chapter
 adjacency, citation, chronology, similarity, and ordinary association in prose or
 a separate relation layer.
 
-Commit through the `derivon-mindmap` command surface, then crosslink the exact
-changed objects, render, and report every graph, source publication, and
+Commit through the `derivon-mindmap` command surface, then link the changed
+documents as its object-document contract says, render, and report every graph, source publication, and
 inserted-reference change. Source-grounded content may be
 published before the learner demonstrates understanding so its documents can do
 the teaching; label every new weight provisional.
@@ -82,7 +82,7 @@ pretending mastery.
 
 Non-destructive verified updates need no redundant approval. Deletion or broad
 restructuring still requires an impact summary and confirmation. Commit through the
-command surface, then crosslink, render, and report every changed graph object,
+command surface, then link the changed documents, render, and report every changed graph object,
 source document, publication, and inserted reference. If static material proves insufficient or
 the learner requests richer content, use the Mindmap rich-document contract and
 prompt them to open each new interactive example.
@@ -108,8 +108,8 @@ stops, evidence is unavailable, or a new workspace is explicitly chosen.
 
 ## Enforce atomic boundaries
 
-Treat Chinese `与`, `和`, `、`, English `and`, and list coordination as mandatory
-atomicity review signals. Split independently definable, learnable, derivable, or
-reusable concepts. Split a derivation that contains multiple problem pressures or
-resolving moves, exposing reusable intermediate results. A conjunction remains
-only when evidence supports one intrinsically unified understanding state.
+Follow the `derivon-mindmap` model's atomic concepts and label handles, and
+resolve every `validate` label advisory. Split a derivation that contains
+multiple problem pressures or resolving moves, exposing reusable intermediate
+results. A conjunction remains only when evidence supports one intrinsically
+unified understanding state.

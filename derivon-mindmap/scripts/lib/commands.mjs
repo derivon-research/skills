@@ -30,6 +30,9 @@ import {
   LEARNER_RECORD_FILE_NAMES, MISSING_VERSION, applicationDataRoot, isBasis, learnerRecordFile,
   learnerRecordPath, parseLearnerRecord,
 } from './learner-records.mjs';
+import {
+  LABEL_CHECKS, LABEL_REVIEW_FILE, applyLabelReview, auditLabelReview, readLabelReview, serializeLabelReview,
+} from './label-review.mjs';
 import { OBJECT_ID_PATTERN, auditWorkspace, isUsableWorkspaceId, safeRelativeDirectory } from './workspace-validator.mjs';
 import { runDerivon, runTool } from './derivon.mjs';
 
@@ -40,14 +43,35 @@ export const COMMANDS = [
     name: 'validate',
     artifact: 'workspace',
     capability: 'read',
-    summary: 'Audit a workspace manifest, its graph and its referenced documents.',
+    summary: 'Audit a workspace manifest, its graph and its referenced documents, including document links to files that do not exist in the workspace.',
     argv: [
       { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' },
       { name: 'manifest', flag: '--manifest', kind: 'path', required: false, description: 'Audit this manifest instead of <workspace>/.derivon/workspace.json.' },
     ],
     stdin: null,
-    result: { changed: [], fields: [{ name: 'concepts', description: 'Concept count.' }, { name: 'derivations', description: 'Derivation count.' }] },
+    result: { changed: [], fields: [
+      { name: 'concepts', description: 'Concept count.' },
+      { name: 'derivations', description: 'Derivation count.' },
+      { name: 'labelReviews', description: 'Open label advisories, each { id, label, check, message }: check coordination (the label contains 与, 和, 及, 、, 并且, and, & or list punctuation), length (wider than the 8 units the canvas shows; a CJK character is 1, others 0.5), shared-name (other concepts, listed in sharedWith, carry the same label, and this one\'s description is missing or equal to another\'s, or it has no qualifier of its own; shared names are allowed), or qualifier-length (data.qualifier, also in the entry, is wider than 8 units). Advisories are not issues and never change status or exit code. Resolve each one: split the point, shorten the label or qualifier, write the difference into data.description and data.qualifier, or acknowledge it with review-label.' },
+      { name: 'acknowledgedLabelReviews', description: 'Advisories silenced by .derivon/label-review.json.' },
+      { name: 'staleLabelReviews', description: 'Acknowledgements that silence nothing because the point is gone or its label (for qualifier-length, its qualifier) changed; the next review-label prunes them.' },
+    ] },
     run: runValidate,
+  },
+  {
+    name: 'review-label',
+    artifact: 'workspace',
+    capability: 'write-structure',
+    summary: 'Acknowledge label advisories that validate reports, recording the current label (and for qualifier-length the qualifier) and a reason in .derivon/label-review.json; renaming the point re-opens the review.',
+    argv: [{ name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' }],
+    stdin: { required: true, schema: 'derivon.label-review-request/v1', description: '{ entries: [{ id, check, reason }] } — check is coordination, length, shared-name or qualifier-length; reason says why the concept stays as it is after considering the advisory\'s remedies. Every entry must name an existing concept whose advisory is open now, or nothing is written.' },
+    result: { changed: [], fields: [
+      { name: 'file', description: 'The record written, .derivon/label-review.json.' },
+      { name: 'recorded', description: 'The acknowledgements this call wrote: id, label, check, and qualifier for qualifier-length.' },
+      { name: 'pruned', description: 'Stale acknowledgements removed.' },
+      { name: 'entries', description: 'Acknowledgements in the record after the write.' },
+    ] },
+    run: runReviewLabel,
   },
   {
     name: 'render',
@@ -66,16 +90,38 @@ export const COMMANDS = [
     name: 'crosslink',
     artifact: 'workspace',
     capability: 'write-document',
-    summary: 'Add exact-label crosslinks to documents; --check reports them without writing.',
+    summary: 'Suggest links for the first exact-label mention of each concept in the selected documents, and write only the suggestions named by --apply. A label several concepts share yields one suggestion per concept; apply the one the text means. A link the author wrote to another target is kept.',
     argv: [
       { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' },
       { name: 'selectors', positional: true, kind: 'id', required: false, repeatable: true, description: 'Object ids, document directories, or document.md paths.' },
       { name: 'all', flag: '--all', kind: 'boolean', required: false, description: 'Select every object.' },
-      { name: 'check', flag: '--check', kind: 'boolean', required: false, description: 'Report missing crosslinks without writing them.' },
+      { name: 'apply', flag: '--apply', kind: 'id', required: false, repeatable: true, description: 'A suggestion id <document-object-id>:<concept-id> to write because it means that concept.' },
+      { name: 'check', flag: '--check', kind: 'boolean', required: false, description: 'Report suggestions without writing.' },
     ],
     stdin: null,
-    result: { changed: ['documents'], fields: [{ name: 'selectedDocuments', description: 'Documents examined.' }, { name: 'insertionCount', description: 'Crosslinks added or pending.' }] },
+    result: { changed: ['documents'], fields: [
+      { name: 'selectedDocuments', description: 'Documents examined.' },
+      { name: 'written', description: 'Links written by this call.' },
+      { name: 'suggestions', description: 'Each suggestion: id, source, line, context with the matched text in brackets, targetId, written. Apply one only when its context means that concept. When several concepts share the matched label, each of them is its own suggestion at the same place, with shared: true, qualifier, description and alternatives (the other suggestion ids there); apply at most one, the one whose description the context means.' },
+      { name: 'kept', description: 'Author links left as written, each suppressing its label in that document.' },
+    ] },
     run: runCrosslink,
+  },
+  {
+    name: 'find-objects',
+    artifact: 'workspace',
+    capability: 'read',
+    summary: 'Find the objects a piece of text may mean, ranked like the editor\'s reference picker; with --from, each candidate carries a Markdown link relative to that object\'s document.',
+    argv: [
+      { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' },
+      { name: 'query', positional: true, kind: 'string', required: true, repeatable: true, description: 'Text to look up: a label, an id, or words from a description.' },
+      { name: 'from', flag: '--from', kind: 'id', required: false, description: 'The object whose document will hold the link.' },
+      { name: 'kind', flag: '--kind', kind: 'string', values: ['concept', 'derivation'], required: false, description: 'Only concepts or only derivations.' },
+      { name: 'limit', flag: '--limit', kind: 'number', required: false, description: 'Most candidates to return; default 10.' },
+    ],
+    stdin: null,
+    result: { changed: [], fields: [{ name: 'candidates', description: 'kind, id, label, qualifier (a concept\'s, or null), detail, document, and link when --from is given. Concepts may share a label; tell them apart by qualifier and detail.' }] },
+    run: runFindObjects,
   },
   {
     name: 'new-object-id',
@@ -293,7 +339,23 @@ async function runValidate({ argv, context }) {
     return { issues: [issue(code, relativeLabel(context.root, manifestPath), error.message)] };
   }
   const { issues, concepts, derivations } = await auditWorkspace({ root: context.root, manifest });
-  return { result: { concepts, derivations }, issues };
+  if (!issues.length) {
+    const links = runJsonTool('crosslink-documents.mjs', ['--audit-links', '--json', '--manifest', manifestPath, context.root]);
+    if (links.error) issues.push(links.error);
+    else issues.push(...(links.value.issues ?? []).map((entry) => issue(entry.code, entry.source, entry.message)));
+  }
+  const labels = await auditLabelReview({ root: context.root, manifest });
+  issues.push(...labels.issues);
+  return {
+    result: {
+      concepts,
+      derivations,
+      labelReviews: labels.labelReviews,
+      acknowledgedLabelReviews: labels.acknowledged,
+      staleLabelReviews: labels.stale,
+    },
+    issues,
+  };
 }
 
 async function runRender({ argv, context }) {
@@ -305,32 +367,47 @@ async function runRender({ argv, context }) {
 async function runCrosslink({ argv, context }) {
   const all = takeFlag(argv, '--all');
   const check = takeFlag(argv, '--check');
+  const apply = [];
+  for (let value = takeValue(argv, '--apply'); value !== undefined && value !== null; value = takeValue(argv, '--apply')) apply.push(value);
   if (all && argv.length) throw new UsageError('Choose either --all or explicit selectors, not both');
   if (!all && !argv.length) throw new UsageError('crosslink requires --all or at least one selector');
+  if (check && apply.length) throw new UsageError('--apply writes; drop --check');
   const toolArgs = ['--json'];
   if (!check) toolArgs.push('--write');
+  for (const id of apply) toolArgs.push('--apply', id);
   toolArgs.push(context.root);
   if (all) toolArgs.push('--all');
   else toolArgs.push(...argv);
   const report = runJsonTool('crosslink-documents.mjs', toolArgs);
   if (report.error) return { issues: [report.error] };
   const value = report.value;
+  const suggestions = value.suggestions ?? [];
   const issues = (value.issues ?? []).map((entry) => issue(entry.code ?? CODE.CROSSLINK_PARSE_ERROR, entry.source, entry.message));
-  const sources = [...new Set((value.insertions ?? []).map((entry) => entry.source.replace(/\/document\.md$/, '')))];
-  if (check) {
-    for (const entry of value.insertions ?? []) {
-      issues.push(issue(CODE.CROSSLINK_MISSING, entry.source, `missing crosslink to ${entry.targetId} for ${JSON.stringify(entry.display)}`));
-    }
-  }
+  const sources = [...new Set(suggestions.filter((entry) => entry.written).map((entry) => entry.source.replace(/\/document\.md$/, '')))];
   return {
-    changed: { documents: check ? [] : sources },
+    changed: { documents: sources },
     result: {
       selectedDocuments: value.selectedDocuments ?? 0,
-      insertionCount: value.insertionCount ?? 0,
-      changedDocuments: value.changedDocuments ?? 0,
+      written: value.writtenCount ?? 0,
+      suggestions: suggestions.map(({ id, source, line, context, targetId, written, shared, qualifier, description, alternatives }) => ({
+        id, source, line, context, targetId, written, ...(shared ? { shared, qualifier, description, alternatives } : {}),
+      })),
+      kept: (value.notices ?? []).map(({ source, line, message }) => ({ source, line, message })),
     },
     issues,
   };
+}
+
+async function runFindObjects({ argv, context }) {
+  const toolArgs = ['--json', '--manifest', context.manifestPath];
+  for (const flag of ['--from', '--kind', '--limit']) {
+    const value = takeValue(argv, flag);
+    if (value !== undefined && value !== null) toolArgs.push(flag, value);
+  }
+  if (!argv.length) throw new UsageError('find-objects needs the text to look up');
+  const report = runJsonTool('find-objects.mjs', [...toolArgs, context.root, ...argv]);
+  if (report.error) return { issues: [report.error] };
+  return { result: { query: report.value.query, candidates: report.value.candidates ?? [] }, issues: [] };
 }
 
 async function runNewObjectId({ argv, context }) {
@@ -538,6 +615,78 @@ async function runImport({ argv, context, stdin }) {
       id: manifest.id,
       concepts: Array.isArray(manifest.graph?.points) ? manifest.graph.points.length : 0,
       derivations: Array.isArray(manifest.graph?.hyperedges) ? manifest.graph.hyperedges.length : 0,
+    },
+  };
+}
+
+/**
+ * Acknowledge label advisories. The whole batch is checked before anything is written: every
+ * entry must name an existing concept, a known check, a reason, and an advisory that is open for
+ * the concept's current label. The record keeps that label, so a later rename re-opens the
+ * review; stale entries are pruned on the way through. A malformed record is refused rather than
+ * overwritten, because it may hold reasons nobody else has.
+ */
+async function runReviewLabel({ argv, context, stdin }) {
+  assertNoArguments(argv);
+  const guard = requireManifest(context);
+  if (guard) return { issues: [guard] };
+  const parsed = parseObject(stdin, ['schema', 'entries']);
+  if (parsed.error) return { issues: [parsed.error] };
+  const { entries: requested } = parsed.payload;
+  if (!Array.isArray(requested) || !requested.length) {
+    return { issues: [issue(CODE.INVALID_PAYLOAD, '/entries', 'expected a non-empty array of { id, check, reason }')] };
+  }
+
+  const recordPath = path.join(context.root, LABEL_REVIEW_FILE);
+  const record = await readLabelReview(context.root);
+  if (record.issues) return { issues: record.issues.map((entry) => ({ ...entry, message: `${entry.message}; repair or remove the record before acknowledging more labels` })) };
+
+  const points = new Map(graphOf(context.manifest).points.map((point) => [point.id, point]));
+  const { advisories, live, stale } = applyLabelReview(context.manifest, record.entries);
+  const issues = [];
+  const recorded = [];
+  const seen = new Set();
+  for (const [index, entry] of requested.entries()) {
+    const at = `/entries/${index}`;
+    if (!entry || typeof entry !== 'object' || Array.isArray(entry)) { issues.push(issue(CODE.INVALID_PAYLOAD, at, 'expected { id, check, reason }')); continue; }
+    const unknown = Object.keys(entry).filter((key) => !['id', 'check', 'reason'].includes(key));
+    if (unknown.length) { issues.push(issue(CODE.INVALID_PAYLOAD, at, `unknown field(s): ${unknown.join(', ')}`)); continue; }
+    const { id, check, reason } = entry;
+    if (!LABEL_CHECKS.includes(check)) { issues.push(issue(CODE.INVALID_PAYLOAD, `${at}/check`, `expected one of ${LABEL_CHECKS.join(', ')}`)); continue; }
+    if (typeof reason !== 'string' || !reason.trim()) { issues.push(issue(CODE.INVALID_PAYLOAD, `${at}/reason`, 'expected a non-empty reason why this label stays')); continue; }
+    const point = typeof id === 'string' ? points.get(id) : undefined;
+    if (!point) { issues.push(issue(CODE.UNKNOWN_OBJECT, `${at}/id`, `no concept ${JSON.stringify(id ?? null)}`)); continue; }
+    const advisory = advisories.find((candidate) => candidate.id === id && candidate.check === check);
+    if (!advisory) {
+      issues.push(issue(CODE.LABEL_REVIEW_NOT_APPLICABLE, at, `concept ${id} (${JSON.stringify(point.data?.label ?? null)}) raises no ${check} advisory; there is nothing to acknowledge`));
+      continue;
+    }
+    if (seen.has(`${id}\u0000${check}`)) { issues.push(issue(CODE.INVALID_PAYLOAD, at, `duplicate entry for ${id} ${check}`)); continue; }
+    seen.add(`${id}\u0000${check}`);
+    recorded.push({ id, label: point.data.label, ...(advisory.qualifier === undefined ? {} : { qualifier: advisory.qualifier }), check, reason: reason.trim() });
+  }
+  if (issues.length) return { issues };
+
+  const kept = live.filter((entry) => !seen.has(`${entry.id}\u0000${entry.check}`));
+  const entries = [...kept, ...recorded];
+  const beforeText = record.text;
+  try {
+    await replaceFileAtomically(recordPath, serializeLabelReview(entries), {
+      temporaryDirectory: context.root,
+      beforeReplace: async () => {
+        const latest = await readFile(recordPath, 'utf8').catch((error) => (error.code === 'ENOENT' ? null : Promise.reject(error)));
+        if (latest !== beforeText) throw conflictError('the label-review record changed while the command ran; re-read and retry');
+      },
+    });
+  } catch (error) {
+    return { issues: [issue(error.code === CODE.CONFLICT_PRECONDITION ? CODE.CONFLICT_PRECONDITION : CODE.IO_ERROR, LABEL_REVIEW_FILE, error.message)] };
+  }
+  return {
+    result: {
+      file: LABEL_REVIEW_FILE,
+      recorded: recorded.map(({ reason, ...entry }) => entry),
+      pruned: stale,
+      entries: entries.length,
     },
   };
 }

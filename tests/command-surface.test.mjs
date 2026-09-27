@@ -30,7 +30,7 @@ async function fixture() {
   for (const [directory, markdown] of [
     ['docs/a', '# Alpha\n\nGrounded alpha.\n'],
     ['docs/b', '# Beta\n\nGrounded beta.\n'],
-    ['docs/h-ab', '# Alpha to Beta\n\nAlpha establishes beta.\n'],
+    ['docs/h-ab', '# Alpha to Beta\n\n[Alpha](../a/document.md) establishes [Beta](../b/document.md).\n'],
   ]) {
     await mkdir(path.join(root, directory), { recursive: true });
     await writeFile(path.join(root, directory, 'document.md'), markdown);
@@ -95,6 +95,7 @@ test('capabilities is the single command manifest and every declared command run
       validate: [[root], undefined],
       render: [[root], undefined],
       crosslink: [[root, '--all'], undefined],
+      'find-objects': [[root, 'Alpha', '--from', 'h-ab'], undefined],
       'new-object-id': [[root], undefined],
       'export-textbook': [[root, '--output', path.join(root, 'textbook'), '--start', 'A', '--target', 'B'], undefined],
       'add-concept': [[root], JSON.stringify({ id: 'C1', data: { label: 'Gamma', document: 'docs/c1' }, markdown: '# Gamma\n\nNew.\n' })],
@@ -105,7 +106,13 @@ test('capabilities is the single command manifest and every declared command run
       import: [[root], JSON.stringify(BASE_MANIFEST)],
       'read-learner-record': [[root, '--data-dir', dataDir], undefined],
       'write-learner-record': [[root, '--data-dir', dataDir, '--expected-version', 'missing'], JSON.stringify({ schema: 'derivon.learning/v1', concepts: {}, derivations: {} })],
+      'review-label': [[root], JSON.stringify({ entries: [{ id: 'A', check: 'coordination', reason: 'Fixture term.' }] })],
     };
+    if (command.name === 'review-label') {
+      const renamed = structuredClone(BASE_MANIFEST);
+      renamed.graph.points[0].data.label = 'Alpha and Omega';
+      await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify(renamed, null, 2)}\n`);
+    }
     const [args, input] = invocations[command.name];
     const result = run([command.name, ...args], input);
     const output = JSON.parse(result.stdout);
@@ -357,7 +364,7 @@ test('delete-object removes the graph object and never its document directory', 
   const output = JSON.parse(removed.stdout);
   assert.deepEqual(output.changed, { manifest: true, objects: ['h-ab'], documents: [], learnerRecord: null });
   assert.deepEqual(output.result.documents, ['docs/h-ab']);
-  assert.equal(await readFile(path.join(root, 'docs/h-ab/document.md'), 'utf8'), '# Alpha to Beta\n\nAlpha establishes beta.\n');
+  assert.equal(await readFile(path.join(root, 'docs/h-ab/document.md'), 'utf8'), '# Alpha to Beta\n\n[Alpha](../a/document.md) establishes [Beta](../b/document.md).\n');
   assert.equal(JSON.parse(await manifest(root)).graph.hyperedges.length, 0);
 
   const unknown = run(['delete-object', root, 'NOPE']);
@@ -375,17 +382,68 @@ test('write-document replaces one document and crosslink stays behind the comman
   assert.equal(await readFile(path.join(root, 'docs/a/document.md'), 'utf8'), '# Alpha\n\nRewritten alpha.\n');
   assertNoTemporaries(await entries(path.join(root, 'docs/a')), 'docs/a');
 
+  await writeFile(path.join(root, 'docs/h-ab/document.md'), '# Alpha to Beta\n\nAlpha establishes Beta.\n');
+  assert.equal(run(['validate', root]).status, 0, 'a derivation document need not link its tails and head');
+
   const checked = run(['crosslink', root, '--all', '--check']);
-  assert.equal(checked.status, 1);
+  assert.equal(checked.status, 0);
   const report = JSON.parse(checked.stdout);
   assert.equal(report.command, 'crosslink');
-  assert.ok(report.result.insertionCount >= 1);
-  assert.ok(report.issues.every((issue) => typeof issue.code === 'string'));
+  assert.deepEqual(report.result.suggestions.map((entry) => entry.id).sort(), ['h-ab:A', 'h-ab:B']);
+  assert.ok(report.result.suggestions.every((entry) => /\[[^\]]+\]/.test(entry.context) && entry.targetId && !entry.written));
 
-  const published = run(['crosslink', root, '--all']);
+  const unselected = JSON.parse(run(['crosslink', root, '--all']).stdout);
+  assert.equal(unselected.result.written, 0);
+  assert.deepEqual(unselected.changed.documents, []);
+
+  const published = run(['crosslink', root, '--all', '--apply', 'h-ab:A']);
   assert.equal(published.status, 0, published.stdout);
-  assert.deepEqual(JSON.parse(published.stdout).changed.documents.length > 0, true);
-  assert.ok((await readFile(path.join(root, 'docs/h-ab/document.md'), 'utf8')).includes('[Alpha]'));
+  const envelope = JSON.parse(published.stdout);
+  assert.deepEqual(envelope.changed.documents, ['docs/h-ab']);
+  assert.equal(envelope.result.written, 1);
+  assert.deepEqual(envelope.result.kept, []);
+  assert.equal(await readFile(path.join(root, 'docs/h-ab/document.md'), 'utf8'), '# Alpha to Beta\n\n[Alpha](../a/document.md) establishes Beta.\n');
+
+  await writeFile(path.join(root, 'docs/a/document.md'), '# Alpha\n\nAlpha precedes Beta and [nothing](../missing/document.md).\n');
+  const dangling = JSON.parse(run(['validate', root]).stdout);
+  assert.deepEqual(dangling.issues.map((entry) => entry.code), ['dangling-link']);
+  assert.equal(run(['crosslink', root, 'A', '--check', '--apply', 'A:B']).status, 2, '--apply writes, so it cannot join --check');
+});
+
+test('find-objects ranks exact matches first and hands back a ready relative link', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const found = JSON.parse(run(['find-objects', root, 'beta', '--from', 'h-ab']).stdout);
+  assert.equal(found.status, 'ok');
+  assert.equal(found.result.candidates[0].id, 'B');
+  assert.equal(found.result.candidates[0].link, '[Beta](../b/document.md)');
+  const derivations = JSON.parse(run(['find-objects', root, 'Alpha', '--kind', 'derivation']).stdout);
+  assert.deepEqual(derivations.result.candidates.map((entry) => entry.id), ['h-ab']);
+  assert.equal(run(['find-objects', root]).status, 2);
+});
+
+test('concepts sharing a name reach find-objects and crosslink with their qualifiers', async (t) => {
+  const root = await fixture();
+  t.after(() => rm(root, { recursive: true, force: true }));
+  const added = run(['add-concept', root], JSON.stringify({ id: 'B2', data: { label: 'Beta', qualifier: 'second', description: 'The other Beta.', document: 'docs/b2' }, markdown: '# Beta\n\nThe other one.\n' }));
+  assert.equal(added.status, 0, added.stdout);
+  const tagged = run(['set-metadata', root], JSON.stringify({ objects: { B: { data: { label: 'Beta', qualifier: 'first', description: 'The first Beta.', document: 'docs/b' } } } }));
+  assert.equal(tagged.status, 0, tagged.stdout);
+  assert.equal(JSON.parse(run(['validate', root]).stdout).result.labelReviews.length, 0);
+
+  const found = JSON.parse(run(['find-objects', root, 'Beta']).stdout);
+  assert.deepEqual(found.result.candidates.slice(0, 2).map(({ id, qualifier }) => ({ id, qualifier })), [{ id: 'B', qualifier: 'first' }, { id: 'B2', qualifier: 'second' }]);
+  assert.equal(JSON.parse(run(['find-objects', root, 'second']).stdout).result.candidates[0].id, 'B2', 'the qualifier is searchable');
+
+  await writeFile(path.join(root, 'docs/a/document.md'), '# Alpha\n\nAlpha precedes Beta.\n');
+  const checked = JSON.parse(run(['crosslink', root, 'A', '--check']).stdout);
+  assert.deepEqual(checked.result.suggestions.map(({ id, shared, qualifier, alternatives }) => ({ id, shared, qualifier, alternatives })), [
+    { id: 'A:B', shared: true, qualifier: 'first', alternatives: ['A:B2'] },
+    { id: 'A:B2', shared: true, qualifier: 'second', alternatives: ['A:B'] },
+  ]);
+  const applied = JSON.parse(run(['crosslink', root, 'A', '--apply', 'A:B2']).stdout);
+  assert.equal(applied.result.written, 1);
+  assert.equal(await readFile(path.join(root, 'docs/a/document.md'), 'utf8'), '# Alpha\n\nAlpha precedes [Beta](../b2/document.md).\n');
 });
 
 test('render and export-textbook return the envelope and coded diagnostics', async (t) => {
@@ -427,7 +485,7 @@ test('render and export-textbook return the envelope and coded diagnostics', asy
 test('the generated bundles stay self-contained after the command surface rebuild', async (t) => {
   const root = await mkdtemp(path.join(os.tmpdir(), 'derivon-standalone-'));
   t.after(() => rm(root, { recursive: true, force: true }));
-  for (const name of ['render-documents.mjs', 'crosslink-documents.mjs', 'export-route-textbook.mjs']) {
+  for (const name of ['render-documents.mjs', 'crosslink-documents.mjs', 'find-objects.mjs', 'export-route-textbook.mjs']) {
     const standalone = path.join(root, name);
     await copyFile(path.join(repo, 'derivon-mindmap/scripts', name), standalone);
     const result = spawnSync(process.execPath, [standalone, '--help'], { cwd: root, encoding: 'utf8' });

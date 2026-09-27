@@ -76,8 +76,12 @@ definitions; do not keep a second one.
 - `write-document` replaces one `document.md`, compare-and-swap on the file.
 - `delete-object` removes graph objects; it never deletes document directories.
 - `import` validates a complete manifest and replaces the current one.
-- `crosslink` adds exact-label crosslinks; `render`, `validate` and
-  `export-textbook` are read-only; `new-object-id` mints an id.
+- `review-label` acknowledges label advisories from `validate`, with a reason,
+  in the companion record `.derivon/label-review.json`.
+- `find-objects` finds the objects a piece of text may mean and returns a ready
+  relative link; `crosslink` suggests links for exact-label mentions and writes the
+  ones you apply; `render`, `validate` and `export-textbook` are read-only;
+  `new-object-id` mints an id.
 - `read-learner-record` / `write-learner-record` read and replace one learner
   record outside the workspace, keyed by the workspace id.
 
@@ -157,13 +161,12 @@ Each object persists only `document.md`, including any inline HTML. The applicat
 renders it on demand while browsing. Never generate, save, require, or link to a
 standalone `index.html` in a workspace. Leave existing unrelated HTML files untouched.
 
-Crosslink exact changed objects before read-only Markdown/media validation: run
-`crosslink` for the changed object ids, then `render`, then `validate` over the
-workspace.
-
-Check a broad migration with `crosslink --all --check`; do not run
-`crosslink --all` without an impact summary and confirmation.
-Crosslinks are reading navigation only and never authorize graph edits.
+Link the changed documents as the
+[object document contract](references/object-documents.md#link-the-concepts-you-mean)
+says, then run `render` for them and `validate` over the workspace. Resolve every
+entry in `validate`'s `result.labelReviews` as the
+[Mindmap model](references/mindmap-model.md#atomic-concepts-and-steps) says:
+split, shorten, tell shared names apart, or acknowledge with a reason.
 
 Preserve Markdown and its inline HTML verbatim outside the requested edits. Follow the
 central object-document contract for every learner-visible source. Use native
@@ -181,7 +184,8 @@ Run `export-textbook` with an output directory, a start set and a target set. Th
 exporter renders Markdown into a separate textbook output, never into workspace
 object directories. It follows solver `executableOrder`, copies complete object
 directories, rewrites known workspace links, copies their bounded transitive
-reference closure, adds route/reference navigation, emits `route.json`, protects
+reference closure, adds route/reference navigation, opens each derivation page with
+its tails and head from the graph, emits `route.json`, protects
 existing output, and refuses an unproven route unless an explicit approximate flag
 is set.
 

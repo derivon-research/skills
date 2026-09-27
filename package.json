@@ -11,6 +11,7 @@
   "devDependencies": {
     "css-tree": "^3.2.1",
     "esbuild": "^0.25.9",
+    "fuse.js": "^7.5.0",
     "image-dimensions": "^2.5.1",
     "katex": "^0.18.0",
     "marked": "^16.4.2",

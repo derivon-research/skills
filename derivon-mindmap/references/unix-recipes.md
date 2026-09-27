@@ -102,10 +102,12 @@ structural ID:
 
 ```sh
 LABEL='Exact label'
-jq --arg label "$LABEL" '[.graph.points[] | select(.data.label == $label)]' "$MANIFEST"
+jq --arg label "$LABEL" '[.graph.points[] | select(.data.label == $label)
+  | {id, qualifier: .data.qualifier, description: .data.description}]' "$MANIFEST"
 ```
 
-Zero matches are unresolved. More than one match is ambiguous. For discovery
+Zero matches are unresolved. Several matches are concepts that share the name; pick
+the one whose qualifier and description fit, and use its id. For discovery
 only, use case-insensitive containment and then inspect candidates:
 
 ```sh
@@ -161,8 +163,9 @@ trap - 0 1 2 15
 ```
 
 Omit `markdown` to adopt a `document.md` that already exists, for example one
-extracted from a source. Coordination in a proposed label requires the atomicity
-review from the Mindmap model. If the call refuses, the manifest is unchanged and a
+extracted from a source. A label is a short handle with the statement in
+`description`, and `validate` flags coordination, overlong labels and shared names
+that nothing tells apart, for the review in the Mindmap model. If the call refuses, the manifest is unchanged and a
 document directory the command created is removed again.
 
 ## Add a hyperedge and document
@@ -269,19 +272,35 @@ out=$($CMD set-metadata "$ROOT" <<<"$payload") || true
 jq -r '.issues[] | "\(.code): \(.path): \(.message)"' <<<"$out"
 ```
 
-## Crosslink, validate, and report
+## Link, validate, and report
+
+The link steps and what each diagnostic means are in
+[object documents](object-documents.md#link-the-concepts-you-mean).
 
 ```sh
-$CMD crosslink "$ROOT" ID...
-$CMD crosslink "$ROOT" --all --check      # report only
+$CMD find-objects "$ROOT" 零空间 --from ID | jq -r '.result.candidates[] | "\(.link)\t\(.qualifier // "")\t\(.detail)"'
+$CMD crosslink "$ROOT" ID... --check | jq -r '.result.suggestions[] | "\(.id)\t\(.context)\t\(.qualifier // "")\t\(.description // "")"'
+$CMD crosslink "$ROOT" ID... --apply ID:CONCEPT  # write the suggestions that mean that concept
 $CMD render "$ROOT" ID...
-$CMD validate "$ROOT"
+$CMD validate "$ROOT" | jq -r '.result.labelReviews[] | "\(.id)\t\(.check)\t\(.label)"'
 ```
 
-Crosslink exact changed objects after editing prose. Check a broad migration with
-`--all --check` and get confirmation before `--all`. After completion, report point
-and hyperedge changes separately and list each updated concept/derivation document
-with ID, label when applicable, relative path, and reason.
+Resolve each label advisory by splitting the point, shortening the label or
+qualifier, or, for `shared-name`, writing the difference into `description` and
+`qualifier` (`set-metadata`). Acknowledge only the labels that must stay, each with its reason,
+in one batch:
+
+```sh
+jq -cn '{entries:[{id:"c-k7f3q2", check:"coordination", reason:"Conventional name of one construction."}]}' \
+  | $CMD review-label "$ROOT"
+```
+
+The call refuses the whole batch when an id is not a concept or its advisory is not
+open, and a later rename of an acknowledged concept re-opens its review.
+
+After completion, report point and hyperedge changes separately and list each
+updated concept/derivation document with ID, label when applicable, relative path,
+and reason.
 
 ## Export a route textbook
 

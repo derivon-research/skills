@@ -77,6 +77,11 @@ if (!route.provenOptimal && !allowApproximate) fail('Route is not proven optimal
 const pointById = new Map(graph.points.map((point) => [point.id, { ...point, kind: 'concept' }]));
 const edgeById = new Map(graph.hyperedges.map((edge) => [edge.id, { ...edge, kind: 'derivation' }]));
 const objectById = new Map([...pointById, ...edgeById]);
+/* Concept names may repeat (derivon-mindmap ADR-0014). Wherever the textbook shows a shared name,
+ * it shows what tells that concept apart beside it: the qualifier, or the description when the
+ * concept has none. A name no other concept carries is shown alone. */
+const labelCounts = new Map();
+for (const point of graph.points) labelCounts.set(point.data?.label, (labelCounts.get(point.data?.label) ?? 0) + 1);
 const objectByPublication = new Map([...objectById.values()].map((object) => [normalizeWorkspacePath(`${object.data.document}/document.md`), object]));
 const sequence = [];
 failure.chapters = sequence;
@@ -107,7 +112,7 @@ for (let cursor = 0; cursor < queue.length; cursor += 1) {
   let markdown;
   try { markdown = await readFile(sourceIndex, 'utf8'); } catch { fail(`Missing document for ${object.kind} ${object.id}: ${path.relative(workspaceRoot, sourceIndex)}`, 1, 'document-missing'); }
   await auditDocumentMediaOrFail({ markdown, objectId: object.id, sourcePath: `${object.data.document}/document.md`, objectDirectory: source });
-  const html = renderDocument(markdown, object.data.label || object.id);
+  const html = renderDocument(markdown, object.kind === 'concept' ? plainTitle(object.data.label || object.id, distinctionOf(object)) : object.data.label || object.id);
   sourceById.set(object.id, source);
   htmlById.set(object.id, html);
   const links = knownObjectLinks(html, object, objectByPublication);
@@ -128,6 +133,7 @@ for (let cursor = 0; cursor < queue.length; cursor += 1) {
 const stageRoot = await prepareStage(outputRoot, force);
 try {
   const exportedEntries = [...sequence, ...references];
+  const exportedIds = new Set(exportedEntries.map((entry) => entry.id));
   for (const entry of exportedEntries) {
     const destination = path.join(stageRoot, 'objects', entry.id);
     await mkdir(path.dirname(destination), { recursive: true });
@@ -139,14 +145,14 @@ try {
     const rewritten = rewriteObjectLinks(htmlById.get(entry.id), linksById.get(entry.id));
     const previous = sequence[index - 1];
     const next = sequence[index + 1];
-    await writeFile(file, injectNavigation(rewritten, previous, next), 'utf8');
+    await writeFile(file, injectNavigation(rewritten, previous, next, endpointLine(objectById.get(entry.id), exportedIds)), 'utf8');
   }
   for (const entry of references) {
     const file = path.join(stageRoot, entry.href);
     const rewritten = rewriteObjectLinks(htmlById.get(entry.id), linksById.get(entry.id));
     const firstReferrerId = [...(referrers.get(entry.id) ?? [])][0];
     const firstReferrer = firstReferrerId ? entryFor(objectById.get(firstReferrerId), 'referrer') : null;
-    await writeFile(file, injectReferenceNavigation(rewritten, firstReferrer), 'utf8');
+    await writeFile(file, injectReferenceNavigation(rewritten, firstReferrer, endpointLine(objectById.get(entry.id), exportedIds)), 'utf8');
   }
 
   const routeDocument = {
@@ -190,13 +196,33 @@ function addPoint(id, role) {
   sequence.push(entryFor(point, role));
 }
 function entryFor(object, role) {
+  const distinction = object.kind === 'concept' ? distinctionOf(object) : null;
   return {
     id: object.id,
     kind: object.kind,
     role,
-    title: object.kind === 'concept' ? object.data.label : `${object.tails.join(' + ') || 'empty'} -> ${object.head}`,
+    title: object.kind === 'concept' ? object.data.label : `${object.tails.join(' + ') || noPremises(object.head)} -> ${object.head}`,
+    ...(distinction ? { distinction } : {}),
     href: `objects/${object.id}/index.html`,
   };
+}
+/** What tells a concept with a shared name apart: its qualifier, else its description; null when
+ * the name is not shared or the concept carries neither. */
+function distinctionOf(point) {
+  if ((labelCounts.get(point.data?.label) ?? 0) < 2) return null;
+  for (const value of [point.data.qualifier, point.data.description]) {
+    if (typeof value === 'string' && value.trim()) return value.trim();
+  }
+  return null;
+}
+/** A title with its distinction, as plain text: fullwidth brackets beside a Han title. */
+function plainTitle(title, distinction) {
+  if (!distinction) return title;
+  return /\p{Script=Han}/u.test(title) ? `${title}（${distinction}）` : `${title} (${distinction})`;
+}
+/** A title with its distinction, as HTML: the distinction in a muted span after the title. */
+function titleHtml(title, distinction) {
+  return `${escapeHtml(title)}${distinction ? ` <span class="derivon-distinction">${escapeHtml(distinction)}</span>` : ''}`;
 }
 async function prepareStage(output, overwrite) {
   try {
@@ -278,23 +304,41 @@ function visitHtml(node, visitor) {
   visitor(node);
   for (const child of node.childNodes ?? []) visitHtml(child, visitor);
 }
-function injectNavigation(html, previous, next) {
+// A derivation page opens with its tails and head, taken from the graph, so a reader can revisit
+// each premise and the conclusion whether or not the document's prose links them.
+function endpointLine(object, exportedIds) {
+  if (object?.kind !== 'derivation') return '';
+  const item = (id) => {
+    const point = pointById.get(id);
+    const label = titleHtml(point?.data?.label || id, point ? distinctionOf(point) : null);
+    return exportedIds.has(id) ? `<a href="../${encodeURIComponent(id)}/index.html">${label}</a>` : `<span>${label}</span>`;
+  };
+  const tails = object.tails.length ? object.tails.map(item).join('<span class="derivon-plus"> + </span>') : `<span class="derivon-no-premises">${escapeHtml(noPremises(object.head))}</span>`;
+  return `<p class="derivon-endpoints" aria-label="Tails and head">${tails}<span class="derivon-arrow"> → </span>${item(object.head)}</p><style>.derivon-endpoints{max-width:820px;margin:0 auto 20px;font:15px/1.6 system-ui,sans-serif}.derivon-endpoints a{color:#245f72}.derivon-endpoints .derivon-plus,.derivon-endpoints .derivon-arrow,.derivon-endpoints .derivon-no-premises,.derivon-endpoints .derivon-distinction{color:#68716c}</style>`;
+}
+// An empty tail set reads as words, not as ∅: a learner meets this line before any set notation.
+// The textbook has no locale, so the words follow the script of the head's label they sit beside.
+function noPremises(headId) {
+  const label = pointById.get(headId)?.data?.label ?? '';
+  return /\p{Script=Han}/u.test(label) ? '无前提' : 'no premises';
+}
+function injectNavigation(html, previous, next, endpoints = '') {
   if (!/<body(?:\s[^>]*)?>/i.test(html)) fail('Object publication is not a complete HTML document with a body element.');
   const nav = `<nav class="derivon-textbook-nav" aria-label="Textbook navigation"><a href="../../index.html">Contents</a>${previous ? `<a rel="prev" href="../${encodeURIComponent(previous.id)}/index.html">Previous</a>` : ''}${next ? `<a rel="next" href="../${encodeURIComponent(next.id)}/index.html">Next</a>` : ''}</nav><style>.derivon-textbook-nav{position:relative;display:flex;gap:12px;flex-wrap:wrap;max-width:820px;margin:0 auto 20px;padding:12px 0;border-bottom:1px solid #d5d8d3;font:14px/1.4 system-ui,sans-serif}.derivon-textbook-nav a{color:#245f72}.derivon-textbook-nav a[rel=next]{margin-left:auto}</style>`;
-  return html.replace(/<body(\s[^>]*)?>/i, (match) => `${match}\n${nav}`);
+  return html.replace(/<body(\s[^>]*)?>/i, (match) => `${match}\n${nav}${endpoints}`);
 }
-function injectReferenceNavigation(html, referrer) {
+function injectReferenceNavigation(html, referrer, endpoints = '') {
   if (!/<body(?:\s[^>]*)?>/i.test(html)) fail('Reference publication is not a complete HTML document with a body element.');
-  const back = referrer ? `<a href="../${encodeURIComponent(referrer.id)}/index.html">Referenced from ${escapeHtml(referrer.title)}</a>` : '';
+  const back = referrer ? `<a href="../${encodeURIComponent(referrer.id)}/index.html">Referenced from ${escapeHtml(plainTitle(referrer.title, referrer.distinction))}</a>` : '';
   const nav = `<nav class="derivon-textbook-nav" aria-label="Reference navigation"><a href="../../index.html">Contents</a>${back}</nav><style>.derivon-textbook-nav{position:relative;display:flex;gap:12px;flex-wrap:wrap;max-width:820px;margin:0 auto 20px;padding:12px 0;border-bottom:1px solid #d5d8d3;font:14px/1.4 system-ui,sans-serif}.derivon-textbook-nav a{color:#245f72}</style>`;
-  return html.replace(/<body(\s[^>]*)?>/i, (match) => `${match}\n${nav}`);
+  return html.replace(/<body(\s[^>]*)?>/i, (match) => `${match}\n${nav}${endpoints}`);
 }
 function textbookIndex(manifestValue, routeValue, chapters, references) {
   const warning = routeValue.provenOptimal ? '' : '<p class="warning"><strong>Warning:</strong> this route was not proven optimal.</p>';
-  const items = chapters.map((chapter, index) => `<li><span>${index + 1}</span><a href="${escapeHtml(chapter.href)}">${escapeHtml(chapter.title)}</a><small>${escapeHtml(chapter.kind)} / ${escapeHtml(chapter.role)}</small></li>`).join('\n');
-  const referenceItems = references.map((reference) => `<li><span>R</span><a href="${escapeHtml(reference.href)}">${escapeHtml(reference.title)}</a><small>${escapeHtml(reference.kind)}</small></li>`).join('\n');
+  const items = chapters.map((chapter, index) => `<li><span>${index + 1}</span><a href="${escapeHtml(chapter.href)}">${titleHtml(chapter.title, chapter.distinction)}</a><small>${escapeHtml(chapter.kind)} / ${escapeHtml(chapter.role)}</small></li>`).join('\n');
+  const referenceItems = references.map((reference) => `<li><span>R</span><a href="${escapeHtml(reference.href)}">${titleHtml(reference.title, reference.distinction)}</a><small>${escapeHtml(reference.kind)}</small></li>`).join('\n');
   const referenceSection = references.length ? `<h2>References</h2><ol>${referenceItems}</ol>` : '';
-  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(manifestValue.document.title)} - Route Textbook</title><style>:root{font-family:Inter,system-ui,sans-serif;color:#202422;background:#fff}body{max-width:900px;margin:auto;padding:32px;line-height:1.6}h1{line-height:1.2}dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px}dt{font-weight:700}dd{margin:0}.warning{padding:12px;border-left:4px solid #a44f3f;background:#fff4f1}ol{padding:0;list-style:none;border-top:1px solid #d5d8d3}li{display:grid;grid-template-columns:32px 1fr auto;gap:12px;padding:12px 0;border-bottom:1px solid #d5d8d3}a{color:#245f72}small{color:#68716c}@media(max-width:560px){body{padding:18px}dl{grid-template-columns:1fr}li{grid-template-columns:28px 1fr}small{grid-column:2}}</style></head><body><h1>${escapeHtml(manifestValue.document.title)}</h1><p>${escapeHtml(manifestValue.document.description)}</p>${warning}<dl><dt>Starts</dt><dd>${escapeHtml(routeValue.startPointIds.join(', ') || 'none')}</dd><dt>Targets</dt><dd>${escapeHtml(routeValue.targetPointIds.join(', '))}</dd><dt>Cost</dt><dd>${escapeHtml(routeValue.cost)}</dd><dt>Optimal</dt><dd>${routeValue.provenOptimal ? 'proven' : 'not proven'}</dd></dl><h2>Learning sequence</h2><ol>${items}</ol>${referenceSection}</body></html>\n`;
+  return `<!doctype html><html lang="en"><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>${escapeHtml(manifestValue.document.title)} - Route Textbook</title><style>:root{font-family:Inter,system-ui,sans-serif;color:#202422;background:#fff}body{max-width:900px;margin:auto;padding:32px;line-height:1.6}h1{line-height:1.2}dl{display:grid;grid-template-columns:max-content 1fr;gap:6px 16px}dt{font-weight:700}dd{margin:0}.warning{padding:12px;border-left:4px solid #a44f3f;background:#fff4f1}ol{padding:0;list-style:none;border-top:1px solid #d5d8d3}li{display:grid;grid-template-columns:32px 1fr auto;gap:12px;padding:12px 0;border-bottom:1px solid #d5d8d3}a{color:#245f72}small,.derivon-distinction{color:#68716c}@media(max-width:560px){body{padding:18px}dl{grid-template-columns:1fr}li{grid-template-columns:28px 1fr}small{grid-column:2}}</style></head><body><h1>${escapeHtml(manifestValue.document.title)}</h1><p>${escapeHtml(manifestValue.document.description)}</p>${warning}<dl><dt>Starts</dt><dd>${escapeHtml(routeValue.startPointIds.join(', ') || 'none')}</dd><dt>Targets</dt><dd>${escapeHtml(routeValue.targetPointIds.join(', '))}</dd><dt>Cost</dt><dd>${escapeHtml(routeValue.cost)}</dd><dt>Optimal</dt><dd>${routeValue.provenOptimal ? 'proven' : 'not proven'}</dd></dl><h2>Learning sequence</h2><ol>${items}</ol>${referenceSection}</body></html>\n`;
 }
 async function serveDirectory(root, requestedPort) {
   const server = createServer(async (request, response) => {

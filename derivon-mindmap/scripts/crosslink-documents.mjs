@@ -10287,7 +10287,7 @@ var VOID_ELEMENTS = /* @__PURE__ */ new Set([
 ]);
 
 // tools/crosslink-documents.source.mjs
-import { lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
+import { access, lstat, mkdir, readFile, realpath, rename, rm, writeFile } from "node:fs/promises";
 import path2 from "node:path";
 import process from "node:process";
 var SCHEMA = "derivon.crosslink-report/v1";
@@ -10295,16 +10295,26 @@ var args = process.argv.slice(2);
 var write = takeFlag("--write");
 var json = takeFlag("--json");
 var all2 = takeFlag("--all");
+var auditLinks = takeFlag("--audit-links");
 var manifestArg = takeValue("--manifest");
+var applyIds = new Set(takeValues("--apply").flatMap((value) => value.split(",")).map((value) => value.trim()).filter(Boolean));
 if (takeFlag("--help") || takeFlag("-h")) {
   console.log(`Usage:
-  node crosslink-documents.mjs [--write] [--json] [--manifest <candidate.json>] <workspace> <selector>...
-  node crosslink-documents.mjs [--write] [--json] [--manifest <candidate.json>] <workspace> --all`);
+  node crosslink-documents.mjs [--write [--apply <suggestion-id>...]] [--json] [--manifest <candidate.json>] <workspace> <selector>...
+  node crosslink-documents.mjs [--write [--apply <suggestion-id>...]] [--json] [--manifest <candidate.json>] <workspace> --all
+  node crosslink-documents.mjs --audit-links [--json] [--manifest <candidate.json>] <workspace>
+
+A suggestion is the first exact-label mention of a concept in one document, with id <document-object-id>:<concept-id>.
+When several concepts share the label, each gets its own suggestion at that mention; apply at most one.
+--write writes the suggestions named by --apply and nothing else.
+--audit-links reports links to files that do not exist in the workspace.`);
   process.exit(0);
 }
 var workspaceRoot = path2.resolve(args.shift() ?? ".");
 var selectors = args;
-if (all2 === Boolean(selectors.length)) fail("Choose exactly one of --all or one or more object selectors.", 2);
+if (!auditLinks && all2 === Boolean(selectors.length)) fail("Choose exactly one of --all or one or more object selectors.", 2);
+if (auditLinks && selectors.length) fail("--audit-links always reads every document; drop the selectors.", 2);
+if (applyIds.size && !write) fail("--apply only makes sense with --write.", 2);
 var manifestPath = manifestArg ? path2.resolve(manifestArg) : path2.join(workspaceRoot, ".derivon", "workspace.json");
 var manifest = JSON.parse(await readFile(manifestPath, "utf8"));
 var objects = [
@@ -10312,7 +10322,7 @@ var objects = [
   ...(manifest.graph?.hyperedges ?? []).map((object) => ({ ...object, kind: "derivation" }))
 ];
 var points = (manifest.graph?.points ?? []).map((point3) => ({ ...point3, kind: "concept" }));
-var selected = all2 ? objects : selectObjects(objects, selectors);
+var selected = all2 || auditLinks ? objects : selectObjects(objects, selectors);
 var pointGroups = /* @__PURE__ */ new Map();
 for (const point3 of points) {
   const group = pointGroups.get(point3.data.label) ?? [];
@@ -10323,6 +10333,14 @@ var labels = [...pointGroups.keys()].filter(Boolean).sort((left, right) => right
 var targetByDocument = new Map(objects.map((object) => [normalizeWorkspacePath(`${object.data.document}/document.md`), object]));
 var reports = [];
 var blockers = [];
+var notices = [];
+if (auditLinks) {
+  const issues = await auditDocumentLinks();
+  if (json) await new Promise((resolve) => process.stdout.write(`${JSON.stringify({ schema: "derivon.link-audit/v1", issues }, null, 2)}
+`, resolve));
+  else for (const entry of issues) console.error(`${entry.code} [${entry.objectId}] ${entry.source}:${entry.line} ${entry.message}`);
+  process.exit(issues.length ? 1 : 0);
+}
 for (const object of selected) {
   const relativeSource = `${object.data.document}/document.md`;
   let filename;
@@ -10352,17 +10370,30 @@ for (const object of selected) {
   });
   reports.push({ ...result, filename, content: source });
   blockers.push(...result.issues);
+  notices.push(...result.notices);
 }
-var insertions = reports.flatMap((report) => report.insertions);
+var suggestions = reports.flatMap((report) => report.insertions);
+var suggestionIds = new Set(suggestions.map((entry) => entry.id));
+for (const id of applyIds) {
+  if (!suggestionIds.has(id)) blockers.push({ objectId: id.split(":")[0], source: ".", line: 1, code: "unknown-suggestion", message: `${id} is not a pending suggestion in the selected documents` });
+}
+var chosen = (entry) => applyIds.has(entry.id);
+var chosenAt = /* @__PURE__ */ new Map();
+for (const entry of suggestions.filter(chosen)) {
+  const place = `${entry.source}\0${entry.start}`;
+  const other = chosenAt.get(place);
+  if (other) blockers.push({ objectId: entry.objectId, source: entry.source, line: entry.line, code: "conflicting-suggestions", message: `${other} and ${entry.id} link the same mention; apply only the concept the text means` });
+  else chosenAt.set(place, entry.id);
+}
 if (blockers.length) {
-  emitReport({ blockers, reports, insertions, wrote: false });
+  emitReport({ blockers, suggestions, written: [] });
   process.exitCode = 1;
 } else if (!write) {
-  emitReport({ blockers: [], reports, insertions, wrote: false });
-  if (insertions.length) process.exitCode = 1;
+  emitReport({ blockers: [], suggestions, written: [] });
 } else {
-  const prepared = reports.filter((entry) => entry.insertions.length).map((report) => {
-    const output = applyPatches(report.content, report.insertions);
+  const prepared = reports.filter((entry) => entry.insertions.some(chosen)).map((report) => {
+    const patches = report.insertions.filter(chosen);
+    const output = applyPatches(report.content, patches);
     const analysis = analyzeMarkdown(output);
     const object = objects.find((entry) => entry.id === report.objectId);
     const verification = resolveInsertions({
@@ -10374,7 +10405,8 @@ if (blockers.length) {
       pointGroups,
       targetByDocument
     });
-    if (verification.issues.length || verification.insertions.length) {
+    const writtenIds = new Set(patches.map((entry) => entry.id));
+    if (verification.issues.length || verification.insertions.some((entry) => writtenIds.has(entry.id))) {
       throw new Error(`Crosslink verification failed for ${report.source}`);
     }
     return { ...report, output };
@@ -10400,7 +10432,7 @@ if (blockers.length) {
     }));
     throw error;
   }
-  emitReport({ blockers: [], reports, insertions, wrote: true });
+  emitReport({ blockers: [], suggestions, written: suggestions.filter(chosen) });
 }
 function selectObjects(values, requested) {
   const normalized = new Set(requested.map((value) => value.replace(/\/$/, "")));
@@ -10482,9 +10514,11 @@ function markdownBlock(source, node2) {
 }
 function resolveInsertions({ source, object, relativeSource, analysis, labels: labels2, pointGroups: pointGroups2, targetByDocument: targetByDocument2 }) {
   const issues = [];
+  const notices2 = [];
   const candidates = [];
   const validLinks = /* @__PURE__ */ new Map();
-  const conflicts = [];
+  const keptTargets = /* @__PURE__ */ new Set();
+  const keptLabels = /* @__PURE__ */ new Set();
   for (const link of analysis.links) {
     const target = resolveObjectHref(`${object.data.document}/${"document.md"}`, link.href, targetByDocument2);
     if (target?.kind === "concept") {
@@ -10497,65 +10531,85 @@ function resolveInsertions({ source, object, relativeSource, analysis, labels: l
       if (index2 < 0 || matchedRanges.some((range) => index2 < range.end && index2 + label.length > range.start)) continue;
       matchedRanges.push({ start: index2, end: index2 + label.length });
       const targets = pointGroups2.get(label);
-      if (targets.length === 1 && target?.id !== targets[0].id) conflicts.push({ label, point: targets[0], link });
+      if (targets.length === 1 && target?.id !== targets[0].id && !keptTargets.has(targets[0].id)) {
+        keptTargets.add(targets[0].id);
+        notices2.push(issue(object, relativeSource, link.line, "kept-author-link", `${label} stays linked to ${link.href}; ${targets[0].id} is not linked in this document`));
+      }
+      if (targets.length > 1 && !keptLabels.has(label)) {
+        keptLabels.add(label);
+        if (!targets.some((point3) => point3.id === target?.id)) {
+          notices2.push(issue(object, relativeSource, link.line, "kept-author-link", `${label} stays linked to ${link.href}; ${targets.map((point3) => point3.id).join(", ")} are not linked in this document`));
+        }
+      }
     }
   }
+  const terms = labels2.map((label) => ({ label, targets: pointGroups2.get(label) }));
   for (const block of analysis.blocks) {
     for (const group of block.groups) {
-      for (const label of labels2) {
-        const targets = pointGroups2.get(label);
-        if (targets.length === 1 && targets[0].id === object.id) continue;
+      for (const { label, targets } of terms) {
+        const occupyOnly = targets.some((point3) => point3.id === object.id);
         let from = 0;
         for (; ; ) {
           const index2 = findLabel(group.text, label, from);
           if (index2 < 0) break;
           const sourceRange = groupRange(group, index2, index2 + label.length);
-          if (sourceRange) candidates.push({ label, targets, ...sourceRange, line: lineAt(source, sourceRange.start) });
+          if (sourceRange) candidates.push({ label, targets, occupyOnly, ...sourceRange, line: lineAt(source, sourceRange.start) });
           from = index2 + Math.max(1, label.length);
         }
       }
     }
   }
-  candidates.sort((left, right) => left.start - right.start || right.label.length - left.label.length);
+  candidates.sort((left, right) => left.start - right.start || right.label.length - left.label.length || Number(right.occupyOnly) - Number(left.occupyOnly));
   const firstByLabel = /* @__PURE__ */ new Map();
   let occupiedEnd = -1;
   for (const candidate of candidates) {
     if (candidate.start < occupiedEnd) continue;
     occupiedEnd = candidate.end;
+    if (candidate.occupyOnly) continue;
     if (!firstByLabel.has(candidate.label)) firstByLabel.set(candidate.label, candidate);
   }
-  const insertions2 = [];
-  const conflictedTargets = /* @__PURE__ */ new Set();
-  for (const conflict of conflicts.sort((left, right) => left.link.start - right.link.start)) {
-    const candidate = firstByLabel.get(conflict.label);
-    const existing = validLinks.get(conflict.point.id);
-    if ((candidate === void 0 || conflict.link.start <= candidate.start) && (existing === void 0 || existing > conflict.link.start) && !conflictedTargets.has(conflict.point.id)) {
-      issues.push(issue(object, relativeSource, conflict.link.line, "conflicting-link", `${conflict.label} is linked to ${conflict.link.href}`));
-      conflictedTargets.add(conflict.point.id);
-    }
-  }
+  const insertions = [];
+  const suggest = (candidate, point3, extra = {}) => insertions.push({
+    id: `${object.id}:${point3.id}`,
+    objectId: object.id,
+    source: relativeSource,
+    line: candidate.line,
+    start: candidate.start,
+    end: candidate.end,
+    display: source.slice(candidate.start, candidate.end),
+    context: contextAround(source, candidate.start, candidate.end),
+    targetId: point3.id,
+    href: relativeObjectHref(`${object.data.document}/${"document.md"}`, point3.data.document),
+    ...extra
+  });
+  const linkedBefore = (point3, candidate) => {
+    const existing = validLinks.get(point3.id);
+    return existing !== void 0 && existing <= candidate.start;
+  };
   for (const [label, candidate] of firstByLabel) {
     if (candidate.targets.length > 1) {
-      issues.push(issue(object, relativeSource, candidate.line, "ambiguous-label", `${label} matches ${candidate.targets.map((target) => target.id).join(", ")}`));
+      if (keptLabels.has(label) || candidate.targets.some((point4) => linkedBefore(point4, candidate))) continue;
+      const ids = candidate.targets.map((point4) => `${object.id}:${point4.id}`);
+      for (const point4 of candidate.targets) {
+        suggest(candidate, point4, {
+          shared: true,
+          qualifier: typeof point4.data.qualifier === "string" && point4.data.qualifier.trim() ? point4.data.qualifier : null,
+          description: typeof point4.data.description === "string" ? point4.data.description : null,
+          alternatives: ids.filter((id) => id !== `${object.id}:${point4.id}`)
+        });
+      }
       continue;
     }
     const point3 = candidate.targets[0];
-    if (conflictedTargets.has(point3.id)) continue;
-    const existing = validLinks.get(point3.id);
-    if (existing !== void 0 && existing <= candidate.start) continue;
-    const href = relativeObjectHref(`${object.data.document}/${"document.md"}`, point3.data.document);
-    insertions2.push({
-      objectId: object.id,
-      source: relativeSource,
-      line: candidate.line,
-      start: candidate.start,
-      end: candidate.end,
-      display: source.slice(candidate.start, candidate.end),
-      targetId: point3.id,
-      href
-    });
+    if (keptTargets.has(point3.id)) continue;
+    if (linkedBefore(point3, candidate)) continue;
+    suggest(candidate, point3);
   }
-  return { objectId: object.id, source: relativeSource, insertions: insertions2.sort((a, b) => a.start - b.start), issues };
+  return { objectId: object.id, source: relativeSource, insertions: insertions.sort((a, b) => a.start - b.start || a.targetId.localeCompare(b.targetId)), issues, notices: notices2 };
+}
+function contextAround(source, start, end, width = 8) {
+  const clean = (value) => value.replace(/\s+/g, " ");
+  return `${clean(source.slice(Math.max(0, start - width), start))}[${source.slice(start, end)}]${clean(source.slice(end, end + width))}`;
 }
 function groupRange(group, visibleStart, visibleEnd) {
   const first = group.leaves.find((leaf) => visibleStart >= leaf.textStart && visibleStart < leaf.textEnd);
@@ -10582,9 +10636,9 @@ function hasBoundaries(text4, start, end) {
 function hasCjk(value) {
   return /[\p{Script=Han}\p{Script=Hiragana}\p{Script=Katakana}\p{Script=Hangul}]/u.test(value);
 }
-function applyPatches(source, insertions2) {
+function applyPatches(source, insertions) {
   let output = source;
-  for (const patch of [...insertions2].sort((a, b) => b.start - a.start)) {
+  for (const patch of [...insertions].sort((a, b) => b.start - a.start)) {
     const raw = output.slice(patch.start, patch.end);
     const replacement = `[${raw}](${patch.href})`;
     output = `${output.slice(0, patch.start)}${replacement}${output.slice(patch.end)}`;
@@ -10644,34 +10698,97 @@ function lineAt(source, offset) {
 function issue(object, source, line, code2, message) {
   return { objectId: object.id, source, line, code: code2, message };
 }
-function emitReport({ blockers: issues, reports: documents, insertions: insertions2, wrote }) {
+function emitReport({ blockers: issues, suggestions: suggestions2, written }) {
+  const writtenIds = new Set(written.map((entry) => entry.id));
   const report = {
     schema: SCHEMA,
     mode: write ? "write" : "check",
     selectedDocuments: selected.length,
-    changedDocuments: new Set(insertions2.map((entry) => entry.source)).size,
-    insertionCount: insertions2.length,
-    cleanDocuments: documents.filter((entry) => !entry.insertions.length && !entry.issues.length).map((entry) => entry.source),
-    skippedDocuments: [],
-    insertions: insertions2.map(({ start, end, ...entry }) => entry),
-    issues
+    changedDocuments: new Set(written.map((entry) => entry.source)).size,
+    writtenCount: written.length,
+    suggestions: suggestions2.map(({ start, end, href, display, objectId, ...entry }) => ({ ...entry, written: writtenIds.has(entry.id) })),
+    issues,
+    notices
   };
   if (json) {
     process.stdout.write(`${JSON.stringify(report, null, 2)}
 `);
     return;
   }
-  for (const entry of report.insertions) {
-    console.log(`${wrote ? "Linked" : "Missing"} [${entry.objectId}] ${entry.source}:${entry.line} ${JSON.stringify(entry.display)} -> ${entry.targetId} (${entry.href})`);
+  for (const entry of report.suggestions) {
+    const shared = entry.shared ? ` (shared name; ${[entry.qualifier, entry.description].filter(Boolean).join(": ") || "no qualifier or description"})` : "";
+    console.log(`${entry.written ? "Linked" : "Suggested"} ${entry.id} ${entry.source}:${entry.line} ${entry.context}${shared}`);
   }
   for (const entry of issues) console.error(`Crosslink error [${entry.objectId}] ${entry.source}:${entry.line} ${entry.code}: ${entry.message}`);
-  console.log(`${wrote ? "Wrote" : "Checked"} ${report.selectedDocuments} document(s): ${report.insertionCount} link(s), ${issues.length} issue(s).`);
+  for (const entry of notices) console.log(`Kept [${entry.objectId}] ${entry.source}:${entry.line} ${entry.message}`);
+  console.log(`${write ? "Wrote" : "Checked"} ${report.selectedDocuments} document(s): ${report.suggestions.length} suggestion(s), ${report.writtenCount} written, ${issues.length} issue(s).`);
+}
+async function auditDocumentLinks() {
+  const issues = [];
+  const realRoot = await realpath(workspaceRoot);
+  for (const object of objects) {
+    const relativeSource = `${object.data.document}/document.md`;
+    let source;
+    try {
+      source = await readFile(await safeWorkspaceSource(workspaceRoot, relativeSource), "utf8");
+    } catch {
+      continue;
+    }
+    let analysis;
+    try {
+      analysis = analyzeMarkdown(source);
+    } catch {
+      continue;
+    }
+    for (const link of analysis.links) {
+      const value = String(link.href ?? "").trim();
+      if (!value || value.startsWith("#") || value.startsWith("//") || /^[a-z][a-z\d+.-]*:/i.test(value)) continue;
+      if (resolveObjectHref(relativeSource, value, targetByDocument)) continue;
+      if (!await workspaceFileExists(realRoot, relativeSource, value)) {
+        issues.push(issue(object, relativeSource, link.line, "dangling-link", `${JSON.stringify(link.text)} links to ${value}, which is not a file in the workspace`));
+      }
+    }
+  }
+  return issues;
+}
+async function workspaceFileExists(realRoot, sourceDocument, href) {
+  if (href.startsWith("/") || href.startsWith("\\")) return false;
+  let decoded;
+  try {
+    decoded = href.split(/[?#]/, 1)[0].split("/").map((segment) => decodeURIComponent(segment)).join("/");
+  } catch {
+    return false;
+  }
+  let relative;
+  try {
+    relative = normalizeWorkspacePath(path2.posix.join(path2.posix.dirname(normalizeWorkspacePath(sourceDocument)), decoded));
+  } catch {
+    return false;
+  }
+  const resolved = path2.resolve(realRoot, ...relative.split("/"));
+  if (!resolved.startsWith(`${realRoot}${path2.sep}`)) return false;
+  try {
+    await access(resolved);
+    return true;
+  } catch {
+    return false;
+  }
 }
 function takeFlag(flag) {
   const index2 = args.indexOf(flag);
   if (index2 < 0) return false;
   args.splice(index2, 1);
   return true;
+}
+function takeValues(flag) {
+  const values = [];
+  for (let index2 = args.indexOf(flag); index2 >= 0; index2 = args.indexOf(flag)) {
+    const value = args[index2 + 1];
+    if (!value || value.startsWith("--")) fail(`Missing value for ${flag}`, 2);
+    args.splice(index2, 2);
+    values.push(value);
+  }
+  return values;
 }
 function takeValue(flag) {
   const index2 = args.indexOf(flag);

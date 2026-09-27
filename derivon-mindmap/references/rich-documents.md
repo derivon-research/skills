@@ -27,22 +27,6 @@ Use the least powerful representation that carries the teaching meaning:
 3. Use complete, visible raw HTML only for a concrete capability Markdown lacks.
 4. Add HTML/CSS/JavaScript interaction only under the gate below.
 
-## Cross-reference documented concepts
-
-On the first meaningful prose mention of another canonical concept, link its
-visible label to that concept's `document.md` with a standard relative link, for
-example `[Agent Loop](../concept-agent-loop/document.md)`. Compute the href from
-manifest document paths; never guess it from an object ID. The link is reading
-navigation only, not a prerequisite, derivation, containment, replacement, or
-backlink.
-
-After writing a document batch, run `derivon-workspace.mjs crosslink <workspace>
-<object-id>...` for the exact changed object IDs before validation. It links unambiguous exact canonical
-labels in prose while leaving headings, code, math, existing links, raw HTML, and
-image alt text alone. Add semantic aliases manually. Report every source document
-changed by crosslinking. Whole-workspace `--all` use requires a `--check` report and
-confirmation before `--all`.
-
 ## Static figures and owned assets
 
 Put every Agent-authored media dependency inside the consuming object's document
