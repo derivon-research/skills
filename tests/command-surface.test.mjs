@@ -406,24 +406,25 @@ test('write-document replaces one document and crosslink stays behind the comman
   await writeFile(path.join(root, 'docs/h-ab/document.md'), '# Alpha to Beta\n\nAlpha establishes Beta.\n');
   assert.equal(run(['validate', root]).status, 0, 'a derivation document need not link its tails and head');
 
+  await writeFile(path.join(root, 'docs/a/document.md'), '# Alpha\n\nAlpha precedes Beta.\n');
   const checked = run(['crosslink', root, '--all', '--check']);
   assert.equal(checked.status, 0);
   const report = JSON.parse(checked.stdout);
   assert.equal(report.command, 'crosslink');
-  assert.deepEqual(report.result.suggestions.map((entry) => entry.id).sort(), ['h-ab:A', 'h-ab:B']);
+  assert.deepEqual(report.result.suggestions.map((entry) => entry.id), ['A:B'], 'a derivation is never offered its own tails and head');
   assert.ok(report.result.suggestions.every((entry) => /\[[^\]]+\]/.test(entry.context) && entry.targetId && !entry.written));
 
   const unselected = JSON.parse(run(['crosslink', root, '--all']).stdout);
   assert.equal(unselected.result.written, 0);
   assert.deepEqual(unselected.changed.documents, []);
 
-  const published = run(['crosslink', root, '--all', '--apply', 'h-ab:A']);
+  const published = run(['crosslink', root, '--all', '--apply', 'A:B']);
   assert.equal(published.status, 0, published.stdout);
   const envelope = JSON.parse(published.stdout);
-  assert.deepEqual(envelope.changed.documents, ['docs/h-ab']);
+  assert.deepEqual(envelope.changed.documents, ['docs/a']);
   assert.equal(envelope.result.written, 1);
   assert.deepEqual(envelope.result.kept, []);
-  assert.equal(await readFile(path.join(root, 'docs/h-ab/document.md'), 'utf8'), '# Alpha to Beta\n\n[Alpha](../a/document.md) establishes Beta.\n');
+  assert.equal(await readFile(path.join(root, 'docs/a/document.md'), 'utf8'), '# Alpha\n\nAlpha precedes [Beta](../b/document.md).\n');
 
   await writeFile(path.join(root, 'docs/a/document.md'), '# Alpha\n\nAlpha precedes Beta and [nothing](../missing/document.md).\n');
   const dangling = JSON.parse(run(['validate', root]).stdout);

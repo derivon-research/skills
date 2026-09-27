@@ -5,26 +5,31 @@ Mindmap application the same commands are tools, the workspace is fixed by the
 session, and none of this is needed; these recipes are for a shell with no client
 running.
 
-These recipes require a POSIX shell, `jq`, `derivon`, Node.js, and an absolute
-installed skill path:
+These recipes require a POSIX shell (bash and zsh both run them as written), `jq`,
+`derivon`, Node.js, and an absolute installed skill path:
 
 ```sh
 set -eu
 SKILL_DIR=/absolute/path/to/installed/derivon-mindmap
 WORKSPACE=/absolute/path/to/workspace
 MANIFEST="$WORKSPACE/.derivon/workspace.json"
-CMD="node $SKILL_DIR/scripts/derivon-workspace.mjs"
+dw() { node "$SKILL_DIR/scripts/derivon-workspace.mjs" "$@"; }
 ```
 
 Resolve `SKILL_DIR` from the loaded skill location. Do not guess an Agent-specific
 installation directory.
 
-`$CMD` is the script command surface. Every write goes through it and one call is
+`dw` is the script command surface. Every write goes through it and one call is
 one commit: the command builds the candidate, validates the graph and the
 workspace reference rules, writes the documents it owns first, and replaces the
 manifest last. There is no staged candidate to check first. Run
-`$CMD --capabilities` for the machine-readable command list, argv, stdin and
+`dw --capabilities` for the machine-readable command list, argv, stdin and
 capabilities.
+
+`dw` is a function rather than a string variable because zsh does not split an
+unquoted `$VAR` into words: a command kept in a variable fails there as `no such file or
+directory`. Pass several object ids as an array for the same reason:
+`ids=(c-a c-b); dw render "$ROOT" "${ids[@]}"`.
 
 `derivon` remains a stateless processor. Use `jq | derivon | jq` directly for
 reads and queries only.
@@ -52,7 +57,7 @@ manifest. `import` validates it and creates the manifest atomically:
 set -eu
 ROOT=/absolute/path/to/new-workspace
 SKILL_DIR=/absolute/path/to/installed/derivon-mindmap
-CMD="node $SKILL_DIR/scripts/derivon-workspace.mjs"
+dw() { node "$SKILL_DIR/scripts/derivon-workspace.mjs" "$@"; }
 ID=my-workspace
 mkdir -p "$ROOT/.derivon"
 [ ! -e "$ROOT/.derivon/workspace.json" ] || { printf '%s\n' "Refusing to replace an existing manifest" >&2; exit 1; }
@@ -61,8 +66,8 @@ jq -n --arg id "$ID" --arg title 'Untitled Mindmap' --arg description '' '{
   id: $id,
   document: {title: $title, description: $description},
   graph: {points: [], hyperedges: []}
-}' | $CMD import "$ROOT"
-$CMD validate "$ROOT"
+}' | dw import "$ROOT"
+dw validate "$ROOT"
 ```
 
 The top-level `id` is the workspace's identity: the user names it, `document.title` is only
@@ -82,8 +87,8 @@ workflow state, Agent files, Git metadata, or object directories.
 ## Validate and inspect
 
 ```sh
-$CMD validate "$ROOT"
-$CMD render "$ROOT"
+dw validate "$ROOT"
+dw render "$ROOT"
 jq '.graph' "$MANIFEST" | derivon validate --pretty
 jq '.graph' "$MANIFEST" | derivon point list --pretty
 jq '.graph' "$MANIFEST" | derivon point get A --pretty
@@ -149,7 +154,7 @@ build a directory from the id. Ids need only be unique inside one graph.
 call. Mint the id through the command surface too:
 
 ```sh
-NEW=$($CMD new-object-id "$ROOT" --kind concept)
+NEW=$(dw new-object-id "$ROOT" --kind concept)
 ID=$(printf '%s' "$NEW" | jq -r '.result.id')
 DOC=$(printf '%s' "$NEW" | jq -r '.result.document')
 MARKDOWN=$(mktemp)
@@ -159,7 +164,7 @@ printf '%s\n' '# Limit' '' 'Source-grounded definition, scope, and example.' > "
 jq -cn --arg id "$ID" --arg label 'Limit' --arg document "$DOC" \
   --arg description 'The value a function approaches.' --rawfile markdown "$MARKDOWN" \
   '{id:$id, data:{label:$label, description:$description, document:$document}, markdown:$markdown}' \
-  | $CMD add-concept "$ROOT"
+  | dw add-concept "$ROOT"
 rm -f "$MARKDOWN"
 trap - 0 1 2 15
 ```
@@ -176,7 +181,7 @@ Read every tail, the proposed derivation source, and the head together. Every ta
 must contribute; distinct arguments become parallel hyperedges.
 
 ```sh
-NEW=$($CMD new-object-id "$ROOT" --kind derivation)
+NEW=$(dw new-object-id "$ROOT" --kind derivation)
 ID=$(printf '%s' "$NEW" | jq -r '.result.id')
 DOC=$(printf '%s' "$NEW" | jq -r '.result.document')
 MARKDOWN=$(mktemp)
@@ -188,7 +193,7 @@ jq -cn --arg id "$ID" --arg document "$DOC" --arg label 'Sum rule for limits' \
   --argjson tails '["limit-f","limit-g"]' --arg head 'limit-sum-result' --argjson weight '2.0' \
   --rawfile markdown "$MARKDOWN" \
   '{id:$id, tails:$tails, head:$head, weight:$weight, data:{label:$label, document:$document}, markdown:$markdown}' \
-  | $CMD add-derivation "$ROOT"
+  | dw add-derivation "$ROOT"
 rm -f "$MARKDOWN"
 trap - 0 1 2 15
 ```
@@ -207,16 +212,16 @@ trap 'rm -f "$B_MD" "$E_MD"' 0 1 2 15
 printf '%s\n' '# B' '' 'Define B.' > "$B_MD"
 printf '%s\n' '# A to B' '' 'Explain how A establishes B.' > "$E_MD"
 
-B=$($CMD new-object-id "$ROOT" --kind concept)
+B=$(dw new-object-id "$ROOT" --kind concept)
 jq -cn --argjson new "$B" --arg label B --rawfile markdown "$B_MD" \
   '{id:$new.result.id, data:{label:$label, document:$new.result.document}, markdown:$markdown}' \
-  | $CMD add-concept "$ROOT"
+  | dw add-concept "$ROOT"
 
-EDGE=$($CMD new-object-id "$ROOT" --kind derivation)
+EDGE=$(dw new-object-id "$ROOT" --kind derivation)
 jq -cn --argjson new "$EDGE" --argjson b "$B" --arg a "$A" \
   --argjson weight '1.5' --rawfile markdown "$E_MD" \
   '{id:$new.result.id, tails:[$a], head:$b.result.id, weight:$weight, data:{document:$new.result.document}, markdown:$markdown}' \
-  | $CMD add-derivation "$ROOT"
+  | dw add-derivation "$ROOT"
 rm -f "$B_MD" "$E_MD"
 trap - 0 1 2 15
 ```
@@ -231,7 +236,7 @@ exist. Build the candidate with `jq` and feed it in:
 CANDIDATE=$(mktemp)
 trap 'rm -f "$CANDIDATE"' 0 1 2 15
 jq '...the migration...' "$MANIFEST" > "$CANDIDATE"
-$CMD import "$ROOT" < "$CANDIDATE"
+dw import "$ROOT" < "$CANDIDATE"
 rm -f "$CANDIDATE"
 trap - 0 1 2 15
 ```
@@ -243,7 +248,7 @@ changed since it read it:
 
 ```sh
 jq -cn --arg object "$ID" --rawfile markdown revised-document.md \
-  '{object:$object, markdown:$markdown}' | $CMD write-document "$ROOT"
+  '{object:$object, markdown:$markdown}' | dw write-document "$ROOT"
 ```
 
 ## Change metadata, tags, or object data
@@ -254,10 +259,10 @@ list, or whole `data` objects by id:
 ```sh
 jq -cn --argjson document '{"title":"Renamed"}' \
   --argjson tags '[{"id":"starting","label":"Starting points"}]' \
-  '{document:$document, tags:$tags}' | $CMD set-metadata "$ROOT"
+  '{document:$document, tags:$tags}' | dw set-metadata "$ROOT"
 
 jq -cn --argjson objects '{"A":{"data":{"label":"New label","document":"docs/a"}}}' \
-  '{objects:$objects}' | $CMD set-metadata "$ROOT"
+  '{objects:$objects}' | dw set-metadata "$ROOT"
 ```
 
 `data` is replaced whole and must still satisfy the workspace protocol — a point
@@ -272,7 +277,7 @@ manifest and retry; there is nothing to clean up and no partial write to undo.
 
 ```sh
 payload=$(jq -cn --argjson document '{"title":"Renamed"}' '{document:$document}')
-out=$($CMD set-metadata "$ROOT" <<<"$payload") || true
+out=$(dw set-metadata "$ROOT" <<<"$payload") || true
 jq -r '.issues[] | "\(.code): \(.path): \(.message)"' <<<"$out"
 ```
 
@@ -282,11 +287,11 @@ The link steps and what each diagnostic means are in
 [object documents](object-documents.md#link-the-concepts-you-mean).
 
 ```sh
-$CMD find-objects "$ROOT" 零空间 --from ID | jq -r '.result.candidates[] | "\(.link)\t\(.qualifier // "")\t\(.detail)"'
-$CMD crosslink "$ROOT" ID... --check | jq -r '.result.suggestions[] | "\(.id)\t\(.context)\t\(.qualifier // "")\t\(.description // "")"'
-$CMD crosslink "$ROOT" ID... --apply ID:CONCEPT  # write the suggestions that mean that concept
-$CMD render "$ROOT" ID...
-$CMD validate "$ROOT" | jq -r '.result.labelReviews[] | "\(.id)\t\(.check)\t\(.label)"'
+dw find-objects "$ROOT" 零空间 --from ID | jq -r '.result.candidates[] | "\(.link)\t\(.qualifier // "")\t\(.detail)"'
+dw crosslink "$ROOT" ID... --check | jq -r '.result.suggestions[] | "\(.id)\t\(.context)\t\(.qualifier // "")\t\(.description // "")"'
+dw crosslink "$ROOT" ID... --apply ID:CONCEPT  # write the suggestions that mean that concept
+dw render "$ROOT" ID...
+dw validate "$ROOT" | jq -r '.result.labelReviews[] | "\(.id)\t\(.check)\t\(.label)"'
 ```
 
 Resolve each label advisory by splitting the point, shortening the label or
@@ -296,7 +301,7 @@ in one batch:
 
 ```sh
 jq -cn '{entries:[{id:"c-k7f3q2", check:"coordination", reason:"Conventional name of one construction."}]}' \
-  | $CMD review-label "$ROOT"
+  | dw review-label "$ROOT"
 ```
 
 The call refuses the whole batch when an id is not a concept or its advisory is not
@@ -309,7 +314,7 @@ and reason.
 ## Export a route textbook
 
 ```sh
-$CMD export-textbook "$ROOT" --output /absolute/textbook \
+dw export-textbook "$ROOT" --output /absolute/textbook \
   --start A --target Z
 
 # Interactive preview is a long-running server, not a commit. Run the bundle directly.
@@ -330,8 +335,8 @@ mastery, `routes.json` is the confirmed routes; they are read and replaced
 independently.
 
 ```sh
-$CMD read-learner-record "$ROOT" --file state
-$CMD read-learner-record "$ROOT" --file routes
+dw read-learner-record "$ROOT" --file state
+dw read-learner-record "$ROOT" --file routes
 ```
 
 A read returns `result.text` verbatim and `result.version`. `present: false` with
@@ -344,10 +349,10 @@ Write by reading the file, changing what you mean to change, and writing it back
 the version you read:
 
 ```sh
-VERSION=$($CMD read-learner-record "$ROOT" --file state | jq -r '.result.version // "missing"')
-$CMD read-learner-record "$ROOT" --file state | jq -r '.result.text // ""' > state.json
+VERSION=$(dw read-learner-record "$ROOT" --file state | jq -r '.result.version // "missing"')
+dw read-learner-record "$ROOT" --file state | jq -r '.result.text // ""' > state.json
 jq '.concepts["limit"] = {status:"complete", data:{selfReported:true}}' state.json \
-  | $CMD write-learner-record "$ROOT" --file state --expected-version "$VERSION"
+  | dw write-learner-record "$ROOT" --file state --expected-version "$VERSION"
 ```
 
 Leave `basis` out and the command computes it from the workspace; write it and the
@@ -363,5 +368,5 @@ persisted — and deleting one is writing `routes.json` without it:
 
 ```sh
 jq '.routes |= map(select(.id != "r-k7f3q2"))' routes.json \
-  | $CMD write-learner-record "$ROOT" --file routes --expected-version "$VERSION"
+  | dw write-learner-record "$ROOT" --file routes --expected-version "$VERSION"
 ```

@@ -10305,6 +10305,7 @@ if (takeFlag("--help") || takeFlag("-h")) {
   node crosslink-documents.mjs --audit-links [--json] [--manifest <candidate.json>] <workspace>
 
 A suggestion is the first exact-label mention of a concept in one document, with id <document-object-id>:<concept-id>.
+A derivation's own tails and head are never suggested in its document.
 When several concepts share the label, each gets its own suggestion at that mention; apply at most one.
 --write writes the suggestions named by --apply and nothing else.
 --audit-links reports links to files that do not exist in the workspace.`);
@@ -10544,10 +10545,11 @@ function resolveInsertions({ source, object, relativeSource, analysis, labels: l
     }
   }
   const terms = labels2.map((label) => ({ label, targets: pointGroups2.get(label) }));
+  const own3 = /* @__PURE__ */ new Set([object.id, ...object.kind === "derivation" ? [...object.tails ?? [], object.head] : []]);
   for (const block of analysis.blocks) {
     for (const group of block.groups) {
       for (const { label, targets } of terms) {
-        const occupyOnly = targets.some((point3) => point3.id === object.id);
+        const occupyOnly = targets.some((point3) => own3.has(point3.id));
         let from = 0;
         for (; ; ) {
           const index2 = findLabel(group.text, label, from);

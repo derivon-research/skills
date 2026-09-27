@@ -18,11 +18,11 @@ Read and write it through the command surface, which computes the path from the 
 itself:
 
 ```sh
-CMD="node $SKILL_DIR/../derivon-mindmap/scripts/derivon-workspace.mjs"
+dw() { node "$SKILL_DIR/../derivon-mindmap/scripts/derivon-workspace.mjs" "$@"; }
 WORKSPACE=/absolute/path/to/workspace
 
-$CMD read-learner-record "$WORKSPACE" --file state
-$CMD write-learner-record "$WORKSPACE" --file state \
+dw read-learner-record "$WORKSPACE" --file state
+dw write-learner-record "$WORKSPACE" --file state \
   --expected-version <version> < state.json
 ```
 
