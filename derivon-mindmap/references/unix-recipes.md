@@ -331,12 +331,12 @@ URL, output path, and stop command.
 A learner record is not workspace content. It lives in the application data directory,
 keyed by the workspace id, and the command computes that path itself — nothing in
 `.derivon/` points at it and no workspace commit can carry it. `state.json` is
-mastery, `routes.json` is the confirmed routes; they are read and replaced
-independently.
+mastery; each personal route is its own file under `routes/`. They are read and
+replaced independently.
 
 ```sh
-dw read-learner-record "$ROOT" --file state
-dw read-learner-record "$ROOT" --file routes
+dw read-learner-record "$ROOT"
+dw list-personal-routes "$ROOT" | jq '.result.routes[] | {id, label, status, stale}'
 ```
 
 A read returns `result.text` verbatim and `result.version`. `present: false` with
@@ -349,10 +349,10 @@ Write by reading the file, changing what you mean to change, and writing it back
 the version you read:
 
 ```sh
-VERSION=$(dw read-learner-record "$ROOT" --file state | jq -r '.result.version // "missing"')
-dw read-learner-record "$ROOT" --file state | jq -r '.result.text // ""' > state.json
+VERSION=$(dw read-learner-record "$ROOT" | jq -r '.result.version // "missing"')
+dw read-learner-record "$ROOT" | jq -r '.result.text // ""' > state.json
 jq '.concepts["limit"] = {status:"complete", data:{selfReported:true}}' state.json \
-  | dw write-learner-record "$ROOT" --file state --expected-version "$VERSION"
+  | dw write-learner-record "$ROOT" --expected-version "$VERSION"
 ```
 
 Leave `basis` out and the command computes it from the workspace; write it and the
@@ -360,13 +360,44 @@ command keeps it as written, because the basis is the evidence of what a judgeme
 made against and re-writing a file must never silently refresh it. A version that no
 longer matches refuses the whole call with `conflict-precondition` and changes nothing.
 
-A route record has no completion marker and no cursor: how far along a route the
-learner is comes from `state.json` at display time, never from `routes.json`. Its
-`known` is the input snapshot of that solve, not the live known set, which is derived
-from mastery. A route is only written when it was confirmed — a preview is never
-persisted — and deleting one is writing `routes.json` without it:
+## Read and write routes
+
+Workspace routes and personal routes are the same protocol, `derivon.route/v1`, one
+file per route; the commands differ only in where the file lives. Every read carries
+the route's `reading` against the current graph: `order`, `cost`, `errors` (also
+issues) and `warnings`.
 
 ```sh
-jq '.routes |= map(select(.id != "r-k7f3q2"))' routes.json \
-  | dw write-learner-record "$ROOT" --file routes --expected-version "$VERSION"
+dw list-routes "$ROOT" | jq '.result.routes[] | {id, label, status, errors: [.errors[].code]}'
+dw read-route "$ROOT" r-k7f3q2 | jq '.result.reading'
 ```
+
+Write a route under the version you read — `missing` for a new one. Any error refuses
+the write and names the gap to fill; a `target-unreached` error lists, per gap, the
+derivations in the graph that conclude the missing concept:
+
+```sh
+VERSION=$(dw read-route "$ROOT" r-k7f3q2 | jq -r '.result.version // "missing"')
+jq -n '{schema:"derivon.route/v1", id:"r-k7f3q2", label:"From limits to the derivative",
+        known:["limit"], targets:["derivative"], steps:["h-diffquot", "h-derivdef"],
+        ordered:false}' \
+  | dw write-route "$ROOT" r-k7f3q2 --expected-version "$VERSION"
+dw delete-route "$ROOT" r-k7f3q2 --expected-version "$NEW_VERSION"
+```
+
+A personal route is the same document plus, optionally, `basedOn`; the command
+computes its `basis`. Saving an author's route as the learner's own is copying it
+under a new id:
+
+```sh
+dw read-route "$ROOT" r-k7f3q2 | jq -r '.result.text' \
+  | jq '.id = "r-m4n8pw" | .basedOn = "r-k7f3q2"' \
+  | dw write-personal-route "$ROOT" r-m4n8pw --expected-version missing
+dw delete-personal-route "$ROOT" r-m4n8pw --expected-version "$VERSION"
+```
+
+A route has no completion marker and no cursor: how far along a route the learner is
+comes from `state.json` at display time. Its `known` is the route's own starting point, not
+the live known set, which is derived from mastery. A personal route reported `stale`
+was saved against a graph that has since changed: report it, and rewrite or delete it
+only when asked.

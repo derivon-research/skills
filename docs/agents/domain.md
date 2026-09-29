@@ -62,6 +62,7 @@ shared term, defer to the artifact that owns it:
 | Graph protocol `derivon.graph/v1` | `derivon-research/derivon` |
 | Workspace protocol `derivon.workspace/v1`: workspace id, concept, derivation, object document, tag | `derivon-research/derivon-mindmap` |
 | Orientation protocol `derivon.orientation/v1`: orientation configuration, default route seed | `derivon-research/derivon-mindmap` |
+| Route protocol `derivon.route/v1`: route, workspace route (`.derivon/routes/`), personal route (`learner-records/<workspace id>/routes/`) | `derivon-research/derivon-mindmap` |
 | Authoring methodology: problem pressure, problem-led derivation | `derivon-research/skills` (`CONTEXT.md`) |
 
 Do not restate a term owned elsewhere. Link to its source instead. If two sources appear to

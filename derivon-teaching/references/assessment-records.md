@@ -5,10 +5,12 @@ evidence lives where the application already keeps what a learner has reached: t
 **learner record**, outside the workspace.
 
 ```text
-<application data directory>/learner-records/<workspace id>/state.json
+<application data directory>/learner-records/<workspace id>/
+├── state.json          mastery: what teaching writes
+└── routes/<id>.json    personal routes: teaching never writes them
 ```
 
-That file is `derivon.learning/v1`, specified by `derivon-mindmap`'s
+`state.json` is `derivon.learning/v1`, specified by `derivon-mindmap`'s
 [learner records](https://github.com/derivon-research/derivon-mindmap/blob/main/docs/learner-records.md).
 Teaching does not define a protocol of its own and does not add a status axis: it writes
 **judgements** into the one store the application reads, so a concept this skill assesses shows
@@ -21,9 +23,8 @@ itself:
 dw() { node "$SKILL_DIR/../derivon-mindmap/scripts/derivon-workspace.mjs" "$@"; }
 WORKSPACE=/absolute/path/to/workspace
 
-dw read-learner-record "$WORKSPACE" --file state
-dw write-learner-record "$WORKSPACE" --file state \
-  --expected-version <version> < state.json
+dw read-learner-record "$WORKSPACE"
+dw write-learner-record "$WORKSPACE" --expected-version <version> < state.json
 ```
 
 Resolve `SKILL_DIR` to this skill's installed directory before running anything, and follow the

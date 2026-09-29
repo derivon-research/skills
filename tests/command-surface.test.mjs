@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
+import { createHash } from 'node:crypto';
 import {
   chmod, copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile,
 } from 'node:fs/promises';
@@ -24,6 +25,9 @@ const BASE_MANIFEST = {
     ],
   },
 };
+
+const ROUTE = `${JSON.stringify({ schema: 'derivon.route/v1', id: 'r-k7f3q2', label: 'Alpha to Beta', known: ['A'], targets: ['B'], steps: ['h-ab'], ordered: false }, null, 2)}\n`;
+const ROUTE_VERSION = createHash('sha256').update(ROUTE).digest('hex');
 
 async function fixture() {
   const root = await mkdtemp(path.join(os.tmpdir(), 'derivon-command-'));
@@ -80,9 +84,9 @@ test('capabilities is the single command manifest and every declared command run
   }
   /* Learner records are their own capability: a learning session reads them and writes nothing,
    * so they cannot be folded into the workspace-content `read`. */
-  const learnerRecordCapabilities = capabilities.commands
+  const learnerRecordCapabilities = [...new Set(capabilities.commands
     .filter((command) => command.artifact === 'learner-records')
-    .map((command) => command.capability)
+    .map((command) => command.capability))]
     .sort();
   assert.deepEqual(learnerRecordCapabilities, ['read-learner-record', 'write-learner-record']);
 
@@ -107,7 +111,25 @@ test('capabilities is the single command manifest and every declared command run
       'read-learner-record': [[root, '--data-dir', dataDir], undefined],
       'write-learner-record': [[root, '--data-dir', dataDir, '--expected-version', 'missing'], JSON.stringify({ schema: 'derivon.learning/v1', concepts: {}, derivations: {} })],
       'review-label': [[root], JSON.stringify({ entries: [{ id: 'A', check: 'coordination', reason: 'Fixture term.' }] })],
+      'list-routes': [[root], undefined],
+      'read-route': [[root, 'r-k7f3q2'], undefined],
+      'write-route': [[root, 'r-k7f3q2', '--expected-version', 'missing'], ROUTE],
+      'delete-route': [[root, 'r-k7f3q2', '--expected-version', ROUTE_VERSION], undefined],
+      'list-personal-routes': [[root, '--data-dir', dataDir], undefined],
+      'read-personal-route': [[root, 'r-k7f3q2', '--data-dir', dataDir], undefined],
+      'write-personal-route': [[root, 'r-k7f3q2', '--data-dir', dataDir, '--expected-version', 'missing'], ROUTE],
+      'delete-personal-route': [[root, 'r-k7f3q2', '--data-dir', dataDir, '--expected-version', ROUTE_VERSION], undefined],
     };
+    /* A delete carries the version of a route that is there. */
+    if (command.name === 'delete-route') {
+      await mkdir(path.join(root, '.derivon/routes'), { recursive: true });
+      await writeFile(path.join(root, '.derivon/routes/r-k7f3q2.json'), ROUTE);
+    }
+    if (command.name === 'delete-personal-route') {
+      const directory = path.join(dataDir, 'learner-records', BASE_MANIFEST.id, 'routes');
+      await mkdir(directory, { recursive: true });
+      await writeFile(path.join(directory, 'r-k7f3q2.json'), ROUTE);
+    }
     if (command.name === 'review-label') {
       const renamed = structuredClone(BASE_MANIFEST);
       renamed.graph.points[0].data.label = 'Alpha and Omega';
@@ -181,7 +203,7 @@ test('add-concept writes the document first and replaces the manifest last', asy
   }));
   assert.equal(result.status, 0, result.stdout + result.stderr);
   const output = JSON.parse(result.stdout);
-  assert.deepEqual(output.changed, { manifest: true, objects: ['C'], documents: ['docs/c'], learnerRecord: null });
+  assert.deepEqual(output.changed, { manifest: true, objects: ['C'], documents: ['docs/c'], routes: [], learnerRecord: null });
   assert.equal(await readFile(path.join(root, 'docs/c/document.md'), 'utf8'), '# Gamma\n\nA new concept.\n');
   const written = JSON.parse(await manifest(root));
   assert.ok(written.graph.points.some((point) => point.id === 'C'));
@@ -383,7 +405,7 @@ test('delete-object removes the graph object and never its document directory', 
   const removed = run(['delete-object', root, 'h-ab']);
   assert.equal(removed.status, 0, removed.stdout);
   const output = JSON.parse(removed.stdout);
-  assert.deepEqual(output.changed, { manifest: true, objects: ['h-ab'], documents: [], learnerRecord: null });
+  assert.deepEqual(output.changed, { manifest: true, objects: ['h-ab'], documents: [], routes: [], learnerRecord: null });
   assert.deepEqual(output.result.documents, ['docs/h-ab']);
   assert.equal(await readFile(path.join(root, 'docs/h-ab/document.md'), 'utf8'), '# Alpha to Beta\n\n[Alpha](../a/document.md) establishes [Beta](../b/document.md).\n');
   assert.equal(JSON.parse(await manifest(root)).graph.hyperedges.length, 0);
@@ -418,7 +440,7 @@ test('write-document replaces one document and crosslink stays behind the comman
 
   const written = run(['write-document', root], JSON.stringify({ object: 'A', markdown: '# Alpha\n\nRewritten alpha.\n' }));
   assert.equal(written.status, 0, written.stdout);
-  assert.deepEqual(JSON.parse(written.stdout).changed, { manifest: false, objects: [], documents: ['docs/a'], learnerRecord: null });
+  assert.deepEqual(JSON.parse(written.stdout).changed, { manifest: false, objects: [], documents: ['docs/a'], routes: [], learnerRecord: null });
   assert.equal(await readFile(path.join(root, 'docs/a/document.md'), 'utf8'), '# Alpha\n\nRewritten alpha.\n');
   assertNoTemporaries(await entries(path.join(root, 'docs/a')), 'docs/a');
 

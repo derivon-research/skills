@@ -1,6 +1,6 @@
 /**
  * Learner records through the script command surface: the application data directory path, the
- * two record protocols, `basis` and the compare-and-swap write. No client runs in any of these
+ * mastery record, personal routes, `basis` and the compare-and-swap write. No client runs in any of these
  * tests — that is the point of the surface — and every one of them points the application data
  * directory at a temporary directory, so a test can never touch a real learner's records.
  *
@@ -18,7 +18,8 @@ import os from 'node:os';
 import path from 'node:path';
 import test from 'node:test';
 
-import { applicationDataRoot, learnerRecordPath } from '../derivon-mindmap/scripts/lib/learner-records.mjs';
+import { routeBasis } from '../derivon-mindmap/scripts/lib/basis.mjs';
+import { applicationDataRoot, learnerRecordPath, personalRoutePath } from '../derivon-mindmap/scripts/lib/learner-records.mjs';
 
 const repo = path.resolve(new URL('..', import.meta.url).pathname);
 const cli = path.join(repo, 'derivon-mindmap/scripts/derivon-workspace.mjs');
@@ -50,10 +51,12 @@ const BASIS = {
   /** `docs/a` holds `document.md` and `notes.txt`; `docs/c` does not exist at all. */
   A: 'ce84341cfb8e775379dddab4ad946c35ee35e98ab44c07bef504cf76989bfb22',
   C: 'd99cec2e036a0ccd341e0e49e8c25ff8d70bd0b8a4d45e5bc5e846e87f87839c',
-  /** The entries of A, B and h-ab, and nothing else: a route's coverage has no files. */
+  /** The entries of A, B and h-ab, and nothing else: a route's coverage has no files. A personal
+   * route from A to B through h-ab covers exactly these. */
   route: 'c18d6e71d244bcd6851761dea7551977be9633f3b1dca17b65fa10f2ece4b6c0',
-  /** The same route after an object it names is gone: the surviving entries only. Refusing
-   * instead would make this surface unable to recompute a basis the application recomputes. */
+  /** A coverage naming A and an object the graph does not have: the surviving entry only.
+   * Refusing instead would make this surface unable to recompute a basis the application
+   * recomputes. */
   routeWithDeletedObject: 'bd2458f0a18ed61448149bf87cec887dd71b004e103167971b4b144bbdf6a9ce',
 };
 
@@ -94,8 +97,10 @@ async function stateRecord(dataRoot, id = MANIFEST.id) {
   return JSON.parse(await readFile(learnerRecordPath(dataRoot, id, 'state'), 'utf8'));
 }
 
-async function routesRecord(dataRoot, id = MANIFEST.id) {
-  return JSON.parse(await readFile(learnerRecordPath(dataRoot, id, 'routes'), 'utf8'));
+function personalRoute(body = {}) {
+  return JSON.stringify({
+    schema: 'derivon.route/v1', id: 'r-k7f3q2', label: '从 Alpha 走到 Beta', known: ['A'], targets: ['B'], steps: ['h-ab'], ordered: true, ...body,
+  });
 }
 
 async function exists(target) {
@@ -139,12 +144,16 @@ test('the application data directory is the platform data directory joined with 
 
   const dataRoot = applicationDataRoot({ platform: 'darwin', env: {}, home });
   assert.equal(
-    learnerRecordPath(dataRoot, 'learner-fixture', 'routes'),
-    path.join(dataRoot, 'learner-records', 'learner-fixture', 'routes.json'),
+    personalRoutePath(dataRoot, 'learner-fixture', 'r-k7f3q2'),
+    path.join(dataRoot, 'learner-records', 'learner-fixture', 'routes', 'r-k7f3q2.json'),
   );
   /* The key becomes a directory name, so a segment that could escape is refused before the join. */
   for (const id of ['../escape', 'a/b', '', 'UPPER', 'con']) {
     assert.throws(() => learnerRecordPath(dataRoot, id, 'state'), /workspace id/, `\`${id}\` should be refused`);
+  }
+  /* So does a route id: it becomes a file name under routes/. */
+  for (const id of ['../r-k7f3q2', 'r-k7f3q2/..', 'r-K7F3Q2', 'r-k7f3q', 'state']) {
+    assert.throws(() => personalRoutePath(dataRoot, 'learner-fixture', id), /route id/, `\`${id}\` should be refused`);
   }
 });
 
@@ -188,7 +197,7 @@ test('a record written without a client reads back, with the basis the applicati
     version: null,
     text: null,
   });
-  assert.deepEqual(absent.changed, { manifest: false, objects: [], documents: [], learnerRecord: null });
+  assert.deepEqual(absent.changed, { manifest: false, objects: [], documents: [], routes: [], learnerRecord: null });
   assert.equal(absent.artifact, 'learner-records');
   assert.equal(await exists(path.join(dataRoot, 'learner-records')), false, 'reading creates nothing');
 
@@ -265,65 +274,92 @@ test('the basis follows the workspace content and only the object it judges', as
   assert.equal((await stateRecord(dataRoot)).concepts.A.basis, supplied);
 });
 
-test('a route is stored as a reference-only subgraph and carries no completion marker', async (t) => {
+test('a personal route is one file per route, with the basis the application computes', async (t) => {
   const { root, dataRoot } = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
   t.after(() => rm(dataRoot, { recursive: true, force: true }));
-  const args = ['write-learner-record', root, '--file', 'routes', '--data-dir', dataRoot];
+  const target = personalRoutePath(dataRoot, MANIFEST.id, 'r-k7f3q2');
 
-  const route = {
+  const empty = ok(['list-personal-routes', root, '--data-dir', dataRoot]);
+  assert.deepEqual(empty.result.routes, []);
+  const absent = ok(['read-personal-route', root, 'r-k7f3q2', '--data-dir', dataRoot]);
+  assert.equal(absent.result.present, false);
+  assert.equal(absent.result.version, null);
+  assert.equal(await exists(path.join(dataRoot, 'learner-records')), false, 'reading creates nothing');
+
+  const written = ok(['write-personal-route', root, 'r-k7f3q2', '--data-dir', dataRoot, '--expected-version', 'missing'], personalRoute({ basedOn: 'r-sv4d2m' }));
+  assert.equal(written.artifact, 'learner-records');
+  assert.equal(written.changed.learnerRecord, 'routes/r-k7f3q2.json');
+  assert.equal(written.result.path, target);
+  /* The whole file, in the canonical key order, with the basis over known, targets, steps and
+   * each step's endpoints: here the entries of A, B and h-ab. */
+  assert.equal(await readFile(target, 'utf8'), `${JSON.stringify({
+    schema: 'derivon.route/v1',
     id: 'r-k7f3q2',
-    description: '从 Alpha 走到 Beta',
-    targets: ['B'],
+    label: '从 Alpha 走到 Beta',
     known: ['A'],
-    conceptIds: ['A', 'B'],
-    derivationIds: ['h-ab'],
-    order: ['h-ab'],
-    cost: 1.5,
-  };
-  const written = ok([...args, '--expected-version', 'missing'], JSON.stringify({ schema: 'derivon.routes/v1', routes: [route] }));
-  assert.equal(written.changed.learnerRecord, 'routes.json');
-  assert.deepEqual(await routesRecord(dataRoot), {
-    schema: 'derivon.routes/v1',
-    routes: [{ ...route, basis: BASIS.route }],
-  });
+    targets: ['B'],
+    steps: ['h-ab'],
+    ordered: true,
+    basedOn: 'r-sv4d2m',
+    basis: BASIS.route,
+  }, null, 2)}\n`);
 
-  const read = ok(['read-learner-record', root, '--file', 'routes', '--data-dir', dataRoot]);
-  assert.equal(read.result.file, 'routes');
+  const read = ok(['read-personal-route', root, 'r-k7f3q2', '--data-dir', dataRoot]);
   assert.equal(read.result.version, written.result.version);
+  assert.equal(read.result.stale, false);
+  assert.deepEqual(read.result.reading.order, ['h-ab']);
+  assert.equal(read.result.reading.cost, 1.5);
 
-  /* The two files are independent: writing routes left state alone, and vice versa. */
-  assert.equal(await exists(learnerRecordPath(dataRoot, MANIFEST.id, 'state')), false);
+  const listed = ok(['list-personal-routes', root, '--data-dir', dataRoot]);
+  assert.deepEqual(listed.result.routes.map(({ id, status, stale, basedOn, version }) => ({ id, status, stale, basedOn, version })), [
+    { id: 'r-k7f3q2', status: 'ready', stale: false, basedOn: 'r-sv4d2m', version: written.result.version },
+  ]);
 
-  /* Deleting a confirmed route is writing the file without it. */
-  ok([...args, '--expected-version', written.result.version], JSON.stringify({ schema: 'derivon.routes/v1', routes: [] }));
-  assert.deepEqual((await routesRecord(dataRoot)).routes, []);
+  /* Personal routes and mastery are independent files. */
+  assert.equal(await exists(path.dirname(learnerRecordPath(dataRoot, MANIFEST.id, 'state'))), true);
+  await assert.rejects(readFile(learnerRecordPath(dataRoot, MANIFEST.id, 'state')), { code: 'ENOENT' });
+
+  /* A route's basis is the writer's, never the caller's: every save computes it from the graph
+   * as it is now, so a basis sent in — stale or made up — is replaced. */
+  const rewritten = ok(['write-personal-route', root, 'r-k7f3q2', '--data-dir', dataRoot, '--expected-version', written.result.version], personalRoute({ label: '改名', basis: 'a'.repeat(64) }));
+  assert.equal(JSON.parse(await readFile(target, 'utf8')).basis, BASIS.route);
+  assert.equal(JSON.parse(await readFile(target, 'utf8')).basedOn, undefined, 'basedOn is written only when it has a value');
+
+  /* Deleting carries the version it read, and leaves nothing behind. */
+  const refused = run(['delete-personal-route', root, 'r-k7f3q2', '--data-dir', dataRoot, '--expected-version', written.result.version]);
+  assert.equal(refused.status, 1);
+  assert.equal(envelope(refused).issues[0].code, 'conflict-precondition');
+  const deleted = ok(['delete-personal-route', root, 'r-k7f3q2', '--data-dir', dataRoot, '--expected-version', rewritten.result.version]);
+  assert.equal(deleted.changed.learnerRecord, 'routes/r-k7f3q2.json');
+  await assert.rejects(readFile(target), { code: 'ENOENT' });
+  assert.deepEqual(ok(['list-personal-routes', root, '--data-dir', dataRoot]).result.routes, []);
 });
 
-test('a route naming an object the graph no longer has keeps the basis of what remains', async (t) => {
+test('a personal route whose graph changed is reported stale and invalid, never rewritten', async (t) => {
   const { root, dataRoot } = await fixture();
   t.after(() => rm(root, { recursive: true, force: true }));
   t.after(() => rm(dataRoot, { recursive: true, force: true }));
+  ok(['write-personal-route', root, 'r-k7f3q2', '--data-dir', dataRoot, '--expected-version', 'missing'], personalRoute());
+  const target = personalRoutePath(dataRoot, MANIFEST.id, 'r-k7f3q2');
+  const before = await readFile(target, 'utf8');
 
-  /* The application's own routeBasis covers the entries that are there and skips the ones that
-   * are not, so a route confirmed before an object was deleted stays readable and re-writable.
-   * The script has to recompute the same value, so it skips for the same reason. */
-  const route = {
-    id: 'r-k7f3q2',
-    description: 'A route that outlived one of its objects',
-    targets: ['B'],
-    known: [],
-    conceptIds: ['A', 'GHOST'],
-    derivationIds: [],
-    order: [],
-    cost: 1,
-  };
-  const written = ok(
-    ['write-learner-record', root, '--file', 'routes', '--data-dir', dataRoot, '--expected-version', 'missing'],
-    JSON.stringify({ schema: 'derivon.routes/v1', routes: [route] }),
-  );
-  assert.equal(written.status, 'ok', JSON.stringify(written.issues));
-  assert.equal((await routesRecord(dataRoot)).routes[0].basis, BASIS.routeWithDeletedObject);
+  const edited = structuredClone(MANIFEST);
+  edited.graph.hyperedges = [];
+  await writeFile(path.join(root, '.derivon/workspace.json'), `${JSON.stringify(edited, null, 2)}\n`);
+
+  const read = run(['read-personal-route', root, 'r-k7f3q2', '--data-dir', dataRoot]);
+  assert.equal(read.status, 1);
+  const output = envelope(read);
+  assert.equal(output.result.stale, true);
+  assert.deepEqual(output.issues.map((entry) => entry.code), ['dangling-derivation', 'target-unreached']);
+  const listed = envelope(run(['list-personal-routes', root, '--data-dir', dataRoot]));
+  assert.equal(listed.status, 'ok', 'an invalid route is a listed route, not a failed listing');
+  assert.deepEqual(listed.result.routes.map(({ status, stale }) => ({ status, stale })), [{ status: 'invalid', stale: true }]);
+  assert.equal(await readFile(target, 'utf8'), before, 'a read never rewrites the file');
+
+  /* The application's routeBasis skips an id the graph does not have; so does this one. */
+  assert.equal(routeBasis({ manifest: MANIFEST, objectIds: ['A', 'GHOST'] }), BASIS.routeWithDeletedObject);
 });
 
 /* ------------------------------------------------------------------ write discipline */
@@ -392,25 +428,30 @@ test('the write enforces the record protocol before anything reaches the disk', 
   }
   assert.equal(await exists(path.join(dataRoot, 'learner-records')), false, 'a refused write creates nothing');
 
-  const routeArgs = ['write-learner-record', root, '--file', 'routes', '--data-dir', dataRoot, '--expected-version', 'missing'];
-  const route = { id: 'r-k7f3q2', description: 'x', targets: ['B'], known: [], conceptIds: ['A'], derivationIds: [], order: [], cost: 1 };
+  const routeArgs = ['write-personal-route', root, 'r-k7f3q2', '--data-dir', dataRoot, '--expected-version', 'missing'];
   const routeCases = [
-    ['a completion marker', { ...route, completed: true }, 'learner-record-invalid'],
-    ['a step cursor', { ...route, stepState: { cursor: 1 } }, 'learner-record-invalid'],
-    ['a bad route id', { ...route, id: 'route-1' }, 'learner-record-invalid'],
-    ['a cost with two decimals', { ...route, cost: 1.25 }, 'learner-record-invalid'],
-    ['a numeric id in a reference list', { ...route, conceptIds: ['A', 7] }, 'learner-record-invalid'],
-    ['an empty string in a reference list', { ...route, known: ['  '] }, 'learner-record-invalid'],
-    ['a missing reference list', { ...route, order: undefined }, 'learner-record-invalid'],
+    ['a completion marker', personalRoute({ completed: true }), 'unknown-key'],
+    ['a step cursor', personalRoute({ stepState: { cursor: 1 } }), 'unknown-key'],
+    ['an id that is not the file name', personalRoute({ id: 'r-222222' }), 'id-mismatch'],
+    ['a basedOn that is not a route id', personalRoute({ basedOn: 'the author route' }), 'invalid-field'],
+    ['a basis that is not a hash', personalRoute({ basis: 'abc' }), 'invalid-field'],
+    ['a numeric id in a reference list', personalRoute({ known: ['A', 7] }), 'invalid-field'],
+    ['the old routes protocol', JSON.stringify({ schema: 'derivon.routes/v1', routes: [] }), 'wrong-schema'],
+    ['an unreached target', personalRoute({ known: [] }), 'target-unreached'],
   ];
-  for (const [name, entry, code] of routeCases) {
-    const result = run(routeArgs, JSON.stringify({ schema: 'derivon.routes/v1', routes: [entry] }));
+  for (const [name, payload, code] of routeCases) {
+    const result = run(routeArgs, payload);
     assert.equal(result.status, 1, name);
     assert.equal(envelope(result).issues[0].code, code, `${name}: ${result.stdout}`);
   }
   assert.equal(await exists(path.join(dataRoot, 'learner-records')), false);
 
-  const badFile = run([...args.slice(0, 3), '--file', 'orientation'], state({}));
+  const badRouteId = run(['write-personal-route', root, '../state', '--data-dir', dataRoot, '--expected-version', 'missing'], personalRoute());
+  assert.equal(envelope(badRouteId).issues[0].code, 'invalid-id');
+  assert.equal(await exists(path.join(dataRoot, 'learner-records')), false);
+
+  /* The mastery record is the one fixed-name file; there is no --file to pick another. */
+  const badFile = run([...args.slice(0, 3), '--file', 'routes'], state({}));
   assert.equal(badFile.status, 2);
   assert.equal(envelope(badFile).issues[0].code, 'usage');
 });
@@ -427,7 +468,7 @@ test('a broken record file is reported as read, never replaced with an empty rec
   assert.equal(unparseable.status, 1);
   assert.equal(envelope(unparseable).issues[0].code, 'learner-record-unreadable');
 
-  await writeFile(target, JSON.stringify({ schema: 'derivon.routes/v1', routes: [] }));
+  await writeFile(target, personalRoute({ basis: BASIS.route }));
   const foreign = run(['read-learner-record', root, '--data-dir', dataRoot]);
   assert.equal(foreign.status, 1);
   assert.equal(envelope(foreign).issues[0].code, 'learner-record-unreadable');
