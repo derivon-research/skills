@@ -324,16 +324,54 @@ export function validateRoute(manifest, route, { location, fileName, prefix = ''
     }
   }
 
-  /* Root causes only: a step that never fires only because other steps never fire is counted. */
+  /* Root causes only. A root is an unfired step missing a premise no step concludes; a step
+   * that waits on a root, directly or through other waiting steps, is blocked and counted.
+   * Steps left over wait only on each other in a cycle nothing outside starts: the first of
+   * them in list order that lies on such a cycle is a root too, and so on until none is left. */
   const heads = new Set(steps.map((id) => index.edges.get(id).head));
-  let blocked = 0;
-  for (const id of unfired) {
-    const missing = index.edges.get(id).tails.filter((tail) => !closure.has(tail));
-    if (missing.every((tail) => heads.has(tail))) {
-      blocked += 1;
-      continue;
+  const missingOf = new Map(unfired.map((id) => [id, index.edges.get(id).tails.filter((tail) => !closure.has(tail))]));
+  const waitsOn = (id) => unfired.filter((other) => missingOf.get(id).includes(index.edges.get(other).head));
+  const roots = unfired.filter((id) => missingOf.get(id).some((tail) => !heads.has(tail)));
+  const explained = new Set(roots);
+  const explain = () => {
+    for (let grew = true; grew;) {
+      grew = false;
+      for (const id of unfired) {
+        if (explained.has(id) || !waitsOn(id).some((other) => explained.has(other))) continue;
+        explained.add(id);
+        grew = true;
+      }
     }
-    warnings.push({ code: CODE.NEVER_FIRES, path: stepPath(id), derivationId: id, position: positionOf.get(id), missing, message: `step ${positionOf.get(id)} (${id}) never fires: ${missing.map((conceptId) => labelOf(index, conceptId)).join(', ')} never becomes available` });
+  };
+  const onCycle = (id) => {
+    const seen = new Set();
+    const stack = waitsOn(id);
+    while (stack.length) {
+      const next = stack.pop();
+      if (next === id) return true;
+      if (seen.has(next) || explained.has(next)) continue;
+      seen.add(next);
+      stack.push(...waitsOn(next));
+    }
+    return false;
+  };
+  const nextCycleRoot = () => unfired.find((id) => !explained.has(id) && onCycle(id));
+  explain();
+  for (let root = nextCycleRoot(); root; root = nextCycleRoot()) {
+    roots.push(root);
+    explained.add(root);
+    explain();
+  }
+  const rootSet = new Set(roots);
+  const blocked = unfired.length - rootSet.size;
+  for (const id of unfired) {
+    if (!rootSet.has(id)) continue;
+    const missing = missingOf.get(id);
+    const unobtainable = missing.filter((tail) => !heads.has(tail));
+    const reason = unobtainable.length
+      ? `${unobtainable.map((conceptId) => labelOf(index, conceptId)).join(', ')} never becomes available`
+      : `${missing.map((conceptId) => labelOf(index, conceptId)).join(', ')} is concluded only by steps that wait on each other`;
+    warnings.push({ code: CODE.NEVER_FIRES, path: stepPath(id), derivationId: id, position: positionOf.get(id), missing, message: `step ${positionOf.get(id)} (${id}) never fires: ${reason}` });
   }
 
   const first = new Map();

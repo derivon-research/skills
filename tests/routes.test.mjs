@@ -81,6 +81,23 @@ test('an unreached target names its gaps, who wants each, and what could fill it
   assert.deepEqual(bare.errors[0].gaps, [{ conceptId: 't', wantedBy: 't', candidates: ['h-yzt'] }]);
 });
 
+test('steps that only wait on each other in a cycle name the first on the cycle as the root', () => {
+  /* h-ba needs b, which only h-ab concludes; h-ab needs a, which only h-ba concludes. */
+  const manifest = {
+    ...MANIFEST,
+    graph: {
+      points: [...MANIFEST.graph.points, point('a'), point('b')],
+      hyperedges: [...MANIFEST.graph.hyperedges, edge('h-ba', ['b'], 'a'), edge('h-ab', ['a'], 'b')],
+    },
+  };
+  const reading = read({ targets: ['a'], steps: ['h-ba', 'h-ab'] }, 'workspace', manifest);
+  assert.deepEqual(codes(reading.errors), ['target-unreached']);
+  assert.deepEqual(codes(reading.warnings), ['never-fires']);
+  assert.equal(reading.warnings[0].derivationId, 'h-ba');
+  assert.deepEqual(reading.warnings[0].missing, ['b']);
+  assert.equal(reading.blocked, 1);
+});
+
 test('no idle step is reported while a target is unreached, and a detour is idle once it is', () => {
   const unreached = read({ steps: ['h-kx', 'h-zq', 'h-kz'], targets: ['t'] });
   assert.deepEqual(codes(unreached.errors), ['target-unreached']);
