@@ -11,9 +11,12 @@
  * other, and both have to produce a file the other accepts, so the shape rules, the canonical
  * text and the path layout are mirrored here rather than invented.
  *
- * Two files, read and replaced independently:
- *   <application data directory>/learner-records/<workspace id>/state.json   — mastery
- *   <application data directory>/learner-records/<workspace id>/routes.json  — confirmed routes
+ * One state file and one file per personal route, each read and replaced independently:
+ *   <application data directory>/learner-records/<workspace id>/state.json             — mastery
+ *   <application data directory>/learner-records/<workspace id>/routes/<route id>.json — personal routes
+ *
+ * A personal route is a `derivon.route/v1` file, the protocol a workspace route also uses; its
+ * rules live in `routes.mjs`, and this module only says where the file goes.
  *
  * The key is the workspace id from the manifest, never the folder. Copy a workspace and the
  * copy shares the record; a workspace without an id is a broken workspace and never reaches
@@ -23,22 +26,23 @@
 import path from 'node:path';
 import os from 'node:os';
 import process from 'node:process';
-import { masteryBasis, routeBasis } from './basis.mjs';
+import { masteryBasis } from './basis.mjs';
 import { CODE, issue } from './envelope.mjs';
+import { routeFileName } from './routes.mjs';
 import { escapeJsonPointer, isUsableWorkspaceId } from './workspace-validator.mjs';
 
 const LEARNING_SCHEMA = 'derivon.learning/v1';
-const ROUTES_SCHEMA = 'derivon.routes/v1';
 
 /** The Tauri bundle identifier. The application data directory is the platform data directory
  * joined with it, so one constant names the directory both writers compute. */
 const APPLICATION_IDENTIFIER = 'net.derivon.mindmap';
 const LEARNER_RECORDS_DIRECTORY = 'learner-records';
+const PERSONAL_ROUTES_DIRECTORY = 'routes';
 
 /**
- * The two files, each carrying its own protocol: the shape it validates, the text it serializes
- * to, and how a `basis` it leaves out is computed. A third record protocol is a third entry
- * here, not a new branch in the commands.
+ * The fixed-name record files, each carrying its own protocol: the shape it validates, the text
+ * it serializes to, and how a `basis` it leaves out is computed. Personal routes are not here:
+ * they are one file per route, named by the route id.
  */
 export const LEARNER_RECORD_FILES = [
   {
@@ -49,17 +53,8 @@ export const LEARNER_RECORD_FILES = [
     serialize: serializeLearningDocument,
     fill: fillLearningBasis,
   },
-  {
-    name: 'routes',
-    file: 'routes.json',
-    schema: ROUTES_SCHEMA,
-    validate: validateRoutesDocument,
-    serialize: serializeRoutesDocument,
-    fill: fillRoutesBasis,
-  },
 ];
 
-export const LEARNER_RECORD_FILE_NAMES = LEARNER_RECORD_FILES.map((entry) => entry.name);
 
 export function learnerRecordFile(name) {
   return LEARNER_RECORD_FILES.find((entry) => entry.name === name) ?? null;
@@ -102,25 +97,28 @@ export function learnerRecordPath(dataRoot, workspaceId, file) {
   return path.join(dataRoot, LEARNER_RECORDS_DIRECTORY, workspaceId, spec.file);
 }
 
+/** The directory holding one workspace's personal routes, one `<route id>.json` each. */
+export function personalRoutesDirectory(dataRoot, workspaceId) {
+  if (!isUsableWorkspaceId(workspaceId)) throw new Error(`\`${workspaceId}\` is not a usable workspace id`);
+  return path.join(dataRoot, LEARNER_RECORDS_DIRECTORY, workspaceId, PERSONAL_ROUTES_DIRECTORY);
+}
+
+/** One personal route's file. The route id becomes a file name, so it is checked before the
+ * join: a name that could escape `routes/` never reaches one. */
+export function personalRoutePath(dataRoot, workspaceId, routeId) {
+  return path.join(personalRoutesDirectory(dataRoot, workspaceId), routeFileName(routeId));
+}
+
 /* --------------------------------------------------------------------------------------- */
 /* Protocol validation                                                                       */
 /* --------------------------------------------------------------------------------------- */
 
 const BASIS_PATTERN = /^[0-9a-f]{64}$/;
-const ROUTE_ID_PATTERN = /^r-[23456789abcdefghjkmnpqrstvwxyz]{6}$/;
-const WEIGHT_SCALE = 10;
 
 const isRecord = (value) => typeof value === 'object' && value !== null && !Array.isArray(value);
 
 export function isBasis(value) {
   return typeof value === 'string' && BASIS_PATTERN.test(value);
-}
-
-/** A manifest weight's rule, reused for a route's solved cost: non-negative, one decimal place. */
-function isValidCost(value) {
-  if (typeof value !== 'number' || !Number.isFinite(value) || value < 0) return false;
-  const scaled = Math.round(value * WEIGHT_SCALE);
-  return Number.isSafeInteger(scaled) && Math.abs(value - scaled / WEIGHT_SCALE) < 1e-10;
 }
 
 /**
@@ -209,64 +207,6 @@ function checkBasis(value, pointer, requireBasis, issues, suffix) {
   }
 }
 
-/**
- * The application's `readStringList`: an array of non-empty strings, and nothing else. Kept
- * exactly as strict, because a writer here may not produce a file the application's reader
- * refuses — "both must produce a file the same reader accepts".
- */
-function checkStringList(value, pointer, issues) {
-  if (!Array.isArray(value)) {
-    issues.push(issue(CODE.LEARNER_RECORD_INVALID, pointer, 'expected an array of strings'));
-    return;
-  }
-  value.forEach((item, index) => {
-    if (typeof item !== 'string' || !item.trim()) {
-      issues.push(issue(CODE.LEARNER_RECORD_INVALID, `${pointer}/${index}`, 'expected a non-empty string'));
-    }
-  });
-}
-
-const ROUTE_FIELDS = ['id', 'description', 'targets', 'known', 'basis', 'conceptIds', 'derivationIds', 'order', 'cost'];
-
-/** `derivon.routes/v1`: several routes, each a reference-only solved subgraph. A route carries
- * **no completion marker of any kind** — no step state, no cursor, no per-derivation flag —
- * and an unknown key is reported, so a marker is refused by name rather than ignored. */
-function validateRoutesDocument(value, { requireBasis }) {
-  const issues = [];
-  unknownKeys(value, ['schema', 'routes'], '', issues);
-  if (!Array.isArray(value.routes)) {
-    issues.push(issue(CODE.LEARNER_RECORD_INVALID, '/routes', 'expected an array (write an empty array when no route has been confirmed)'));
-    return issues;
-  }
-  const ids = new Set();
-  value.routes.forEach((route, index) => {
-    const pointer = `/routes/${index}`;
-    if (!isRecord(route)) {
-      issues.push(issue(CODE.LEARNER_RECORD_INVALID, pointer, 'expected an object'));
-      return;
-    }
-    unknownKeys(route, ROUTE_FIELDS, pointer, issues);
-    for (const field of ['targets', 'known', 'conceptIds', 'derivationIds', 'order']) {
-      checkStringList(route[field], `${pointer}/${field}`, issues);
-    }
-    if (typeof route.id !== 'string' || !ROUTE_ID_PATTERN.test(route.id)) {
-      issues.push(issue(CODE.LEARNER_RECORD_INVALID, `${pointer}/id`, 'expected r- plus six characters of the object id alphabet'));
-    } else if (ids.has(route.id)) {
-      issues.push(issue(CODE.LEARNER_RECORD_INVALID, `${pointer}/id`, `duplicate route id ${route.id}`));
-    } else {
-      ids.add(route.id);
-    }
-    if (typeof route.description !== 'string' || !route.description.trim()) {
-      issues.push(issue(CODE.LEARNER_RECORD_INVALID, `${pointer}/description`, 'expected a non-empty string'));
-    }
-    checkBasis(route, pointer, requireBasis, issues, 'this route was solved against');
-    if (!isValidCost(route.cost)) {
-      issues.push(issue(CODE.LEARNER_RECORD_INVALID, `${pointer}/cost`, 'expected a finite, non-negative number with at most one decimal place'));
-    }
-  });
-  return issues;
-}
-
 /* --------------------------------------------------------------------------------------- */
 /* Canonical text                                                                            */
 /* --------------------------------------------------------------------------------------- */
@@ -286,24 +226,6 @@ function serializeLearningDocument(value) {
     schema: LEARNING_SCHEMA,
     concepts: map(value.concepts),
     derivations: map(value.derivations),
-  }, null, 2)}\n`;
-}
-
-/** The canonical `routes.json` text. */
-function serializeRoutesDocument(value) {
-  return `${JSON.stringify({
-    schema: ROUTES_SCHEMA,
-    routes: value.routes.map((route) => ({
-      id: route.id,
-      description: route.description,
-      targets: [...route.targets],
-      known: [...route.known],
-      basis: route.basis,
-      conceptIds: [...route.conceptIds],
-      derivationIds: [...route.derivationIds],
-      order: [...route.order],
-      cost: route.cost,
-    })),
   }, null, 2)}\n`;
 }
 
@@ -327,14 +249,6 @@ async function fillLearningBasis(document, context) {
       if (record.basis === undefined) {
         record.basis = await masteryBasis({ realRoot: context.realRoot, manifest: context.manifest, objectId });
       }
-    }
-  }
-}
-
-async function fillRoutesBasis(document, context) {
-  for (const route of document.routes) {
-    if (route.basis === undefined) {
-      route.basis = routeBasis({ manifest: context.manifest, objectIds: [...route.conceptIds, ...route.derivationIds] });
     }
   }
 }

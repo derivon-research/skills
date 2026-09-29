@@ -24,8 +24,8 @@ export const CAPABILITIES_SCHEMA = 'derivon.command-capabilities/v1';
  * content: it lives in the application data directory, keyed by the workspace id, and never
  * enters a manifest, a commit or its revision. */
 export const ARTIFACTS = [
-  { name: 'workspace', summary: "Workspace content: the manifest, its graph objects and the documents they own. Changed only through this surface, by derivon-mindmap's ADR-0011." },
-  { name: 'learner-records', summary: 'Learner records: mastery and confirmed routes, stored outside the workspace in the application data directory, keyed by the workspace id.' },
+  { name: 'workspace', summary: "Workspace content: the manifest, its graph objects, the documents they own and the companion files beside it, such as workspace routes. Changed only through this surface, by derivon-mindmap's ADR-0011." },
+  { name: 'learner-records', summary: 'Learner records: mastery and personal routes, stored outside the workspace in the application data directory, keyed by the workspace id.' },
 ];
 
 export const EXIT = { OK: 0, DIAGNOSTICS: 1, USAGE: 2 };
@@ -66,6 +66,27 @@ export const CODE = {
   BASIS_UNCOMPUTABLE: 'basis-uncomputable',
   LABEL_REVIEW_INVALID: 'label-review-invalid',
   LABEL_REVIEW_NOT_APPLICABLE: 'label-review-not-applicable',
+  /* derivon.route/v1, named by derivon-mindmap's docs/routes.md. Both writers report these
+   * codes for the same subjects; the unreadable layer first, then shape and graph errors, then
+   * warnings. */
+  ROUTE_UNREADABLE: 'unreadable',
+  ROUTE_WRONG_SCHEMA: 'wrong-schema',
+  ROUTE_UNKNOWN_KEY: 'unknown-key',
+  ROUTE_MISSING_FIELD: 'missing-field',
+  ROUTE_INVALID_FIELD: 'invalid-field',
+  ROUTE_ID_MISMATCH: 'id-mismatch',
+  ROUTE_EMPTY_LABEL: 'empty-label',
+  ROUTE_EMPTY_TARGETS: 'empty-targets',
+  ROUTE_DUPLICATE_STEP: 'duplicate-step',
+  ROUTE_FORBIDDEN_FIELD: 'forbidden-field',
+  ROUTE_MISSING_BASIS: 'missing-basis',
+  DANGLING_CONCEPT: 'dangling-concept',
+  DANGLING_DERIVATION: 'dangling-derivation',
+  TARGET_UNREACHED: 'target-unreached',
+  ORDER_NOT_EXECUTABLE: 'order-not-executable',
+  NEVER_FIRES: 'never-fires',
+  IDLE: 'idle',
+  DUPLICATE_HEAD: 'duplicate-head',
 };
 
 /** One diagnostic. `path` is a workspace-relative path or JSON pointer; `.` means the workspace. */
@@ -83,7 +104,7 @@ export function envelope({ command, capability, artifact, status, changed, resul
     status: status ?? (issues.length ? 'diagnostics' : 'ok'),
     capability,
     artifact,
-    changed: { manifest: false, objects: [], documents: [], learnerRecord: null, ...changed },
+    changed: { manifest: false, objects: [], documents: [], routes: [], learnerRecord: null, ...changed },
     result,
     issues,
   };

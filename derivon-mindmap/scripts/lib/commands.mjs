@@ -20,16 +20,20 @@
  * (https://github.com/derivon-research/derivon-mindmap/blob/main/docs/adr/0011-change-workspace-content-through-the-script-command-surface.md).
  */
 
-import { lstat, mkdir, readFile, rm } from 'node:fs/promises';
+import { lstat, mkdir, readFile, rm, unlink } from 'node:fs/promises';
 import path from 'node:path';
 import process from 'node:process';
 import { CODE, issue } from './envelope.mjs';
 import { classifyWorkspacePath, manifestPathFor, readManifest, realWorkspaceRoot, replaceFileAtomically, sha256 } from './fs.mjs';
 import { BasisError } from './basis.mjs';
 import {
-  LEARNER_RECORD_FILE_NAMES, MISSING_VERSION, applicationDataRoot, isBasis, learnerRecordFile,
-  learnerRecordPath, parseLearnerRecord,
+  MISSING_VERSION, applicationDataRoot, isBasis, learnerRecordFile, learnerRecordPath, parseLearnerRecord,
+  personalRoutePath, personalRoutesDirectory,
 } from './learner-records.mjs';
+import {
+  ROUTES_DIRECTORY, asIssues, auditWorkspaceRoutes, decodeRoute, isRouteId, listRouteFiles, loadRouteFile,
+  personalRouteBasis, routeFileName, routeSummary, serializeRoute, validateRoute,
+} from './routes.mjs';
 import {
   LABEL_CHECKS, LABEL_REVIEW_FILE, applyLabelReview, auditLabelReview, readLabelReview, serializeLabelReview,
 } from './label-review.mjs';
@@ -55,6 +59,7 @@ export const COMMANDS = [
       { name: 'labelReviews', description: 'Open label advisories, each { id, label, check, message }: check coordination (the label contains 与, 和, 及, 、, 并且, and, & or list punctuation), length (wider than the 8 units the canvas shows; a CJK character is 1, others 0.5), shared-name (other concepts, listed in sharedWith, carry the same label, and this one\'s description is missing or equal to another\'s, or it has no qualifier of its own; shared names are allowed), or qualifier-length (data.qualifier, also in the entry, is wider than 8 units). Advisories are not issues and never change status or exit code. Resolve each one: split the point, shorten the label or qualifier, write the difference into data.description and data.qualifier, or acknowledge it with review-label.' },
       { name: 'acknowledgedLabelReviews', description: 'Advisories silenced by .derivon/label-review.json.' },
       { name: 'staleLabelReviews', description: 'Acknowledgements that silence nothing because the point is gone or its label (for qualifier-length, its qualifier) changed; the next review-label prunes them.' },
+      { name: 'routes', description: 'Every workspace route in .derivon/routes/, as list-routes reports it; each route error is also an issue.' },
     ] },
     run: runValidate,
   },
@@ -72,6 +77,71 @@ export const COMMANDS = [
       { name: 'entries', description: 'Acknowledgements in the record after the write.' },
     ] },
     run: runReviewLabel,
+  },
+  {
+    name: 'list-routes',
+    artifact: 'workspace',
+    capability: 'read',
+    summary: 'List the workspace routes in .derivon/routes/, each read against the current graph; an invalid or unreadable route is listed with its errors, never dropped.',
+    argv: [{ name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' }],
+    stdin: null,
+    result: { changed: [], fields: [
+      { name: 'routes', description: 'Each route: id, file, version, label, status (ready or invalid), ordered, steps (count), cost, errors (issues), warnings. Codes follow derivon-mindmap docs/routes.md. An unreadable file (unreadable, wrong-schema, unknown-key, missing-field, invalid-field) yields no route. Errors, each also an issue: id-mismatch, empty-label, empty-targets, duplicate-step, forbidden-field, missing-basis, dangling-concept, dangling-derivation, target-unreached (with gaps: each concept nothing in the route concludes, wantedBy, and the candidates in the graph that conclude it), order-not-executable (ordered routes only: the step, its position, and per missing concept producedAt, the position that concludes it, or null). Warnings never refuse anything: never-fires (root causes only), idle (a step no target needs; not reported while a target is unreached), duplicate-head (an earlier step already concludes the same concept, e.g. a parallel derivation). Positions are 1-based in the display order.' },
+    ] },
+    run: runListRoutes,
+  },
+  {
+    name: 'read-route',
+    artifact: 'workspace',
+    capability: 'read',
+    summary: 'Read one workspace route verbatim with the version a write or delete has to carry, and its reading against the current graph.',
+    argv: [
+      { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' },
+      { name: 'route', positional: true, kind: 'id', required: true, description: 'The route id, r- plus six characters.' },
+    ],
+    stdin: null,
+    result: { changed: [], fields: [
+      { name: 'id', description: 'The route id.' },
+      { name: 'file', description: 'The workspace-relative file, .derivon/routes/<id>.json.' },
+      { name: 'present', description: 'Whether the file exists; an absent route is not an error.' },
+      { name: 'version', description: 'The version write-route and delete-route have to carry, or null when there is no file.' },
+      { name: 'text', description: 'The file verbatim.' },
+      { name: 'reading', description: 'When the file is a well-formed route: reading: { status, order (the steps in the order the route is shown), orderSource (written when ordered, else computed), conceptIds, cost, blocked (steps held up only because another step cannot fire), errors, warnings }. Codes follow derivon-mindmap docs/routes.md. An unreadable file (unreadable, wrong-schema, unknown-key, missing-field, invalid-field) yields no route. Errors, each also an issue: id-mismatch, empty-label, empty-targets, duplicate-step, forbidden-field, missing-basis, dangling-concept, dangling-derivation, target-unreached (with gaps: each concept nothing in the route concludes, wantedBy, and the candidates in the graph that conclude it), order-not-executable (ordered routes only: the step, its position, and per missing concept producedAt, the position that concludes it, or null). Warnings never refuse anything: never-fires (root causes only), idle (a step no target needs; not reported while a target is unreached), duplicate-head (an earlier step already concludes the same concept, e.g. a parallel derivation). Positions are 1-based in the display order.' },
+    ] },
+    run: runReadRoute,
+  },
+  {
+    name: 'write-route',
+    artifact: 'workspace',
+    capability: 'write-structure',
+    summary: 'Validate one workspace route against the route protocol and the current graph, refuse it on any error, and replace .derivon/routes/<id>.json atomically if it is still the version you read.',
+    argv: [
+      { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' },
+      { name: 'route', positional: true, kind: 'id', required: true, description: 'The route id; the file is .derivon/routes/<route>.json and the document\'s id must equal it.' },
+      { name: 'expected-version', flag: '--expected-version', kind: 'string', required: true, description: 'The version read-route reported: a 64-character lowercase hex digest, or the word missing for a new route.' },
+    ],
+    stdin: { required: true, schema: 'derivon.route/v1', description: 'A complete derivon.route/v1 document: { schema, id (equal to the <route> argument), label (non-empty), description?, known: [concept ids, may be empty], targets: [concept ids, at least one], steps: [derivation ids, no repeats, may be empty], ordered (true: steps are the route order; false: steps are a set and the order is computed) }. Any error refuses the write; warnings do not. A workspace route carries no basis and no basedOn. A new route\'s id is r- plus six random characters of 23456789abcdefghjkmnpqrstvwxyz that no route in list-routes or list-personal-routes uses.' },
+    result: { changed: ['routes'], fields: [
+      { name: 'id', description: 'The route id.' },
+      { name: 'file', description: 'The file replaced.' },
+      { name: 'version', description: 'The new version, for the next write.' },
+      { name: 'reading', description: 'The route read against the graph, with its warnings.' },
+    ] },
+    run: runWriteRoute,
+  },
+  {
+    name: 'delete-route',
+    artifact: 'workspace',
+    capability: 'delete',
+    summary: 'Delete one workspace route file if it is still the version you read.',
+    argv: [
+      { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root.' },
+      { name: 'route', positional: true, kind: 'id', required: true, description: 'The route id.' },
+      { name: 'expected-version', flag: '--expected-version', kind: 'string', required: true, description: 'The version read-route reported.' },
+    ],
+    stdin: null,
+    result: { changed: ['routes'], fields: [{ name: 'id', description: 'The route id.' }, { name: 'file', description: 'The file removed.' }] },
+    run: runDeleteRoute,
   },
   {
     name: 'render',
@@ -227,10 +297,9 @@ export const COMMANDS = [
     name: 'read-learner-record',
     artifact: 'learner-records',
     capability: 'read-learner-record',
-    summary: 'Read one learner record file from the application data directory, keyed by the workspace id.',
+    summary: 'Read the learner\'s mastery record (state.json) from the application data directory, keyed by the workspace id. Personal routes have their own commands.',
     argv: [
       { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root; its manifest id keys the record.' },
-      { name: 'file', flag: '--file', kind: 'string', required: false, values: [...LEARNER_RECORD_FILE_NAMES], description: 'Which record: state (mastery) or routes. Defaults to state.' },
       { name: 'data-dir', flag: '--data-dir', kind: 'path', required: false, description: 'Override the application data directory root; defaults to the platform application data directory.' },
     ],
     stdin: null,
@@ -241,16 +310,88 @@ export const COMMANDS = [
     name: 'write-learner-record',
     artifact: 'learner-records',
     capability: 'write-learner-record',
-    summary: 'Validate one learner record document, fill in any basis it leaves out, and replace the file atomically.',
+    summary: 'Validate the learner\'s mastery record, fill in any basis it leaves out, and replace state.json atomically.',
     argv: [
       { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root; its manifest id keys the record and supplies the basis.' },
-      { name: 'file', flag: '--file', kind: 'string', required: false, values: [...LEARNER_RECORD_FILE_NAMES], description: 'Which record: state (mastery) or routes. Defaults to state.' },
       { name: 'expected-version', flag: '--expected-version', kind: 'string', required: true, description: 'The version you read: a 64-character lowercase hex digest, or the word missing when there was no file.' },
       { name: 'data-dir', flag: '--data-dir', kind: 'path', required: false, description: 'Override the application data directory root; defaults to the platform application data directory.' },
     ],
-    stdin: { required: true, schema: 'derivon.learning/v1 (--file state) or derivon.routes/v1 (--file routes)', description: 'A complete record document. A record that omits basis has it computed from the workspace; a basis you supply is kept as supplied. A write carries no completion marker for a route.' },
+    stdin: { required: true, schema: 'derivon.learning/v1', description: 'A complete record document. A record that omits basis has it computed from the workspace; a basis you supply is kept as supplied.' },
     result: { changed: ['learnerRecord'], fields: [{ name: 'file', description: 'The record that was written.' }, { name: 'path', description: 'The absolute path replaced.' }, { name: 'version', description: 'The new version, for the next write.' }] },
     run: runWriteLearnerRecord,
+  },
+  {
+    name: 'list-personal-routes',
+    artifact: 'learner-records',
+    capability: 'read-learner-record',
+    summary: 'List the learner\'s personal routes for this workspace, each read against the current graph and checked against its basis.',
+    argv: [
+      { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root; its manifest id keys the records.' },
+      { name: 'data-dir', flag: '--data-dir', kind: 'path', required: false, description: 'Override the application data directory root; defaults to the platform application data directory.' },
+    ],
+    stdin: null,
+    result: { changed: [], fields: [
+      { name: 'directory', description: 'The absolute directory listed.' },
+      { name: 'routes', description: 'Each route: id, file, version, label, status (ready or invalid), ordered, steps (count), cost, basedOn, stale (its basis no longer matches the graph: report it, never re-solve, rewrite or delete it on your own), errors, warnings. Codes follow derivon-mindmap docs/routes.md. An unreadable file (unreadable, wrong-schema, unknown-key, missing-field, invalid-field) yields no route. Errors, each also an issue: id-mismatch, empty-label, empty-targets, duplicate-step, forbidden-field, missing-basis, dangling-concept, dangling-derivation, target-unreached (with gaps: each concept nothing in the route concludes, wantedBy, and the candidates in the graph that conclude it), order-not-executable (ordered routes only: the step, its position, and per missing concept producedAt, the position that concludes it, or null). Warnings never refuse anything: never-fires (root causes only), idle (a step no target needs; not reported while a target is unreached), duplicate-head (an earlier step already concludes the same concept, e.g. a parallel derivation). Positions are 1-based in the display order.' },
+    ] },
+    run: runListPersonalRoutes,
+  },
+  {
+    name: 'read-personal-route',
+    artifact: 'learner-records',
+    capability: 'read-learner-record',
+    summary: 'Read one personal route verbatim with the version a write or delete has to carry, its reading against the current graph, and whether its basis is stale.',
+    argv: [
+      { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root; its manifest id keys the records.' },
+      { name: 'route', positional: true, kind: 'id', required: true, description: 'The route id.' },
+      { name: 'data-dir', flag: '--data-dir', kind: 'path', required: false, description: 'Override the application data directory root; defaults to the platform application data directory.' },
+    ],
+    stdin: null,
+    result: { changed: [], fields: [
+      { name: 'id', description: 'The route id.' },
+      { name: 'path', description: 'The absolute path read.' },
+      { name: 'present', description: 'Whether the file exists; an absent route is not an error.' },
+      { name: 'version', description: 'The version a later write or delete has to carry, or null when there is no file.' },
+      { name: 'text', description: 'The file verbatim.' },
+      { name: 'stale', description: 'True when the route\'s basis no longer matches the graph: report it, never re-solve, rewrite or delete it on your own. Null for an unreadable file.' },
+      { name: 'reading', description: 'When the file is a well-formed route: reading: { status, order (the steps in the order the route is shown), orderSource (written when ordered, else computed), conceptIds, cost, blocked (steps held up only because another step cannot fire), errors, warnings }.' },
+    ] },
+    run: runReadPersonalRoute,
+  },
+  {
+    name: 'write-personal-route',
+    artifact: 'learner-records',
+    capability: 'write-learner-record',
+    summary: 'Validate one personal route against the route protocol and the current graph, refuse it on any error, compute its basis, and replace the file atomically if it is still the version you read.',
+    argv: [
+      { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root; its manifest id keys the records and supplies the basis.' },
+      { name: 'route', positional: true, kind: 'id', required: true, description: 'The route id; the document\'s id must equal it.' },
+      { name: 'expected-version', flag: '--expected-version', kind: 'string', required: true, description: 'The version you read: a 64-character lowercase hex digest, or the word missing for a new route.' },
+      { name: 'data-dir', flag: '--data-dir', kind: 'path', required: false, description: 'Override the application data directory root; defaults to the platform application data directory.' },
+    ],
+    stdin: { required: true, schema: 'derivon.route/v1', description: 'A complete derivon.route/v1 document: { schema, id (equal to the <route> argument), label (non-empty), description?, known: [concept ids, may be empty], targets: [concept ids, at least one], steps: [derivation ids, no repeats, may be empty], ordered (true: steps are the route order; false: steps are a set and the order is computed) }. Any error refuses the write; warnings do not. A personal route may carry basedOn, the workspace route it was copied from (a record of origin, not a link). Its basis is always computed from the graph as it is now; one you send is replaced.' },
+    result: { changed: ['learnerRecord'], fields: [
+      { name: 'id', description: 'The route id.' },
+      { name: 'path', description: 'The absolute path replaced.' },
+      { name: 'version', description: 'The new version, for the next write.' },
+      { name: 'reading', description: 'The route read against the graph, with its warnings.' },
+    ] },
+    run: runWritePersonalRoute,
+  },
+  {
+    name: 'delete-personal-route',
+    artifact: 'learner-records',
+    capability: 'write-learner-record',
+    summary: 'Delete one personal route if it is still the version you read. Mastery records are not affected.',
+    argv: [
+      { name: 'workspace', positional: true, kind: 'path', required: true, description: 'Workspace root; its manifest id keys the records.' },
+      { name: 'route', positional: true, kind: 'id', required: true, description: 'The route id.' },
+      { name: 'expected-version', flag: '--expected-version', kind: 'string', required: true, description: 'The version read-personal-route reported.' },
+      { name: 'data-dir', flag: '--data-dir', kind: 'path', required: false, description: 'Override the application data directory root; defaults to the platform application data directory.' },
+    ],
+    stdin: null,
+    result: { changed: ['learnerRecord'], fields: [{ name: 'id', description: 'The route id.' }, { name: 'path', description: 'The absolute path removed.' }] },
+    run: runDeletePersonalRoute,
   },
 ];
 
@@ -349,6 +490,8 @@ async function runValidate({ argv, context }) {
   }
   const labels = await auditLabelReview({ root: context.root, manifest });
   issues.push(...labels.issues);
+  const routes = await auditWorkspaceRoutes({ root: context.root, realRoot: context.realRoot, manifest });
+  issues.push(...routes.issues);
   return {
     result: {
       concepts,
@@ -356,6 +499,7 @@ async function runValidate({ argv, context }) {
       labelReviews: labels.labelReviews,
       acknowledgedLabelReviews: labels.acknowledged,
       staleLabelReviews: labels.stale,
+      routes: routes.routes,
     },
     issues,
   };
@@ -696,10 +840,195 @@ async function runReviewLabel({ argv, context, stdin }) {
 }
 
 /* --------------------------------------------------------------------------------------- */
+/* Routes                                                                                    */
+/*                                                                                           */
+/* One protocol, derivon.route/v1, in two places: workspace routes are workspace content in   */
+/* .derivon/routes/<id>.json; personal routes are learner records. A write validates the     */
+/* route's shape and reads it against the current graph, and any error refuses it: a route  */
+/* that is invalid the moment it is stored is never stored. The version is the SHA-256 of   */
+/* the file's bytes, and a write or delete carries the version it read.                     */
+/* --------------------------------------------------------------------------------------- */
+
+function takeRouteId(argv) {
+  const id = argv.shift();
+  if (id === undefined || id.startsWith('--')) throw new UsageError('a route id is required');
+  return id;
+}
+
+function routeIdIssue(id) {
+  return isRouteId(id) ? null : issue(CODE.INVALID_ID, '.', `\`${id}\` is not a route id: expected r- plus six characters of 23456789abcdefghjkmnpqrstvwxyz`);
+}
+
+function takeExpectedVersion(argv, { allowMissing }) {
+  const expected = takeValue(argv, '--expected-version');
+  const words = allowMissing ? `a 64-character lowercase hex digest or the word ${MISSING_VERSION}` : 'a 64-character lowercase hex digest';
+  if (expected === null) throw new UsageError(`--expected-version is required: the version you read${allowMissing ? `, or the word ${MISSING_VERSION}` : ''}`);
+  if (expected === MISSING_VERSION && allowMissing) return null;
+  if (!isBasis(expected)) throw new UsageError(`--expected-version must be ${words}`);
+  return expected;
+}
+
+/**
+ * Decode, validate and serialize one route arriving on stdin, as the file `<id>.json`. A personal
+ * route's basis is computed here, from the graph as it is now, before it is validated: a basis is
+ * never carried over from an earlier version or written by hand.
+ */
+function prepareRoute(stdin, { location, id, manifest, label }) {
+  if (!stdin.trim()) return { issues: [issue(CODE.INVALID_PAYLOAD, '.', 'a derivon.route/v1 document on stdin is required')] };
+  let route;
+  try {
+    route = JSON.parse(stdin);
+  } catch (error) {
+    return { issues: [issue(CODE.ROUTE_UNREADABLE, `${label}#`, `not valid JSON: ${error.message}`)] };
+  }
+  const unreadable = decodeRoute(route, { prefix: label });
+  if (unreadable.length) return { issues: unreadable };
+  if (location === 'personal') route.basis = personalRouteBasis(manifest, route);
+  const reading = validateRoute(manifest, route, { location, fileName: routeFileName(id), prefix: label });
+  if (reading.errors.length) return { issues: asIssues(reading.errors) };
+  return { route, reading, text: serializeRoute(route, { location }) };
+}
+
+/** The version of a file: the SHA-256 of its bytes, or null when it is not there. A symbolic
+ * link is refused rather than followed. */
+async function fileVersion(target) {
+  let info;
+  try {
+    info = await lstat(target);
+  } catch (error) {
+    if (error.code === 'ENOENT') return null;
+    throw error;
+  }
+  if (info.isSymbolicLink()) throw Object.assign(new Error('a symbolic link is refused rather than followed'), { code: CODE.DOCUMENT_UNSAFE });
+  return sha256(await readFile(target));
+}
+
+/** Replace `target` with `text` if it is still at `expected` (null: still absent). */
+async function replaceRouteFile(target, text, expected, { temporaryDirectory, label }) {
+  let current;
+  try {
+    current = await fileVersion(target);
+  } catch (error) {
+    return [issue(error.code === CODE.DOCUMENT_UNSAFE ? CODE.DOCUMENT_UNSAFE : CODE.IO_ERROR, label, error.message)];
+  }
+  if (current !== expected) return [issue(CODE.CONFLICT_PRECONDITION, label, 'the route changed since it was read; re-read it and retry')];
+  try {
+    await mkdir(path.dirname(target), { recursive: true });
+    await replaceFileAtomically(target, text, {
+      temporaryDirectory,
+      beforeReplace: async () => {
+        if (await fileVersion(target) !== expected) throw conflictError('the route changed while the command ran; re-read it and retry');
+      },
+    });
+  } catch (error) {
+    return [issue(error.code === CODE.CONFLICT_PRECONDITION ? CODE.CONFLICT_PRECONDITION : CODE.IO_ERROR, label, error.message)];
+  }
+  return [];
+}
+
+/** Remove `target` if it is still at `expected`. */
+async function removeRouteFile(target, expected, label) {
+  let current;
+  try {
+    current = await fileVersion(target);
+  } catch (error) {
+    return [issue(error.code === CODE.DOCUMENT_UNSAFE ? CODE.DOCUMENT_UNSAFE : CODE.IO_ERROR, label, error.message)];
+  }
+  if (current === null) return [issue(CODE.CONFLICT_PRECONDITION, label, 'the route is not there; re-read and retry')];
+  if (current !== expected) return [issue(CODE.CONFLICT_PRECONDITION, label, 'the route changed since it was read; re-read it and retry')];
+  try {
+    await unlink(target);
+  } catch (error) {
+    return [issue(CODE.IO_ERROR, label, error.message)];
+  }
+  return [];
+}
+
+/**
+ * Where a workspace route lives on its real path. `.derivon/routes` must stay inside the
+ * workspace; a missing directory is created by the write.
+ */
+async function workspaceRouteTarget(context, id) {
+  const placement = await classifyWorkspacePath(context.realRoot, context.root, ROUTES_DIRECTORY);
+  if (placement.status !== 'inside') {
+    return { issue: issue(CODE.DOCUMENT_UNSAFE, ROUTES_DIRECTORY, 'the route directory does not stay inside the workspace on its real path') };
+  }
+  const directory = path.join(placement.real, ...placement.missing);
+  return { target: path.join(directory, routeFileName(id)), label: `${ROUTES_DIRECTORY}/${routeFileName(id)}` };
+}
+
+async function runListRoutes({ argv, context }) {
+  assertNoArguments(argv);
+  const guard = requireManifest(context);
+  if (guard) return { issues: [guard] };
+  const listed = await listRouteFiles(path.join(context.root, ROUTES_DIRECTORY), { realRoot: context.realRoot, label: ROUTES_DIRECTORY });
+  const routes = [];
+  for (const file of listed.files) {
+    const loaded = await loadRouteFile(file.path, { location: 'workspace', fileName: file.name, manifest: context.manifest, label: file.label });
+    routes.push(routeSummary(file, loaded));
+  }
+  /* An invalid route is a listed route with errors, not a failed listing. */
+  return { result: { routes }, issues: listed.issues };
+}
+
+async function runReadRoute({ argv, context }) {
+  const id = takeRouteId(argv);
+  assertNoArguments(argv);
+  const bad = routeIdIssue(id);
+  if (bad) return { issues: [bad] };
+  const guard = requireManifest(context);
+  if (guard) return { issues: [guard] };
+  const placed = await workspaceRouteTarget(context, id);
+  if (placed.issue) return { issues: [placed.issue] };
+  const loaded = await loadRouteFile(placed.target, { location: 'workspace', manifest: context.manifest, label: placed.label });
+  return {
+    result: { id, file: placed.label, present: loaded.present, version: loaded.version, text: loaded.text, reading: loaded.reading },
+    issues: loaded.errors,
+  };
+}
+
+async function runWriteRoute({ argv, context, stdin }) {
+  const expected = takeExpectedVersion(argv, { allowMissing: true });
+  const id = takeRouteId(argv);
+  assertNoArguments(argv);
+  const bad = routeIdIssue(id);
+  if (bad) return { issues: [bad] };
+  const guard = requireManifest(context);
+  if (guard) return { issues: [guard] };
+  const placed = await workspaceRouteTarget(context, id);
+  if (placed.issue) return { issues: [placed.issue] };
+  const prepared = prepareRoute(stdin, { location: 'workspace', id, manifest: context.manifest, label: placed.label });
+  if (prepared.issues) return { issues: prepared.issues };
+  /* The temporary sibling goes in the workspace root, as the manifest's does: the application
+   * watches `.derivon`, and the root is the nearest point outside it on the same filesystem. */
+  const issues = await replaceRouteFile(placed.target, prepared.text, expected, { temporaryDirectory: context.root, label: placed.label });
+  if (issues.length) return { issues };
+  return {
+    changed: { routes: [id] },
+    result: { id, file: placed.label, version: sha256(prepared.text), reading: prepared.reading },
+  };
+}
+
+async function runDeleteRoute({ argv, context }) {
+  const expected = takeExpectedVersion(argv, { allowMissing: false });
+  const id = takeRouteId(argv);
+  assertNoArguments(argv);
+  const bad = routeIdIssue(id);
+  if (bad) return { issues: [bad] };
+  const guard = requireManifest(context);
+  if (guard) return { issues: [guard] };
+  const placed = await workspaceRouteTarget(context, id);
+  if (placed.issue) return { issues: [placed.issue] };
+  const issues = await removeRouteFile(placed.target, expected, placed.label);
+  if (issues.length) return { issues };
+  return { changed: { routes: [id] }, result: { id, file: placed.label } };
+}
+
+/* --------------------------------------------------------------------------------------- */
 /* Learner-record commands                                                                   */
 /*                                                                                           */
 /* Learner records are not workspace content. The two questions they answer — what has this   */
-/* learner reached, and which routes did they confirm — live beside each other in the          */
+/* learner reached, and which routes are their own — live beside each other in the             */
 /* application data directory, keyed by the workspace id, and are read and replaced            */
 /* independently. The command computes that path itself: the workspace root supplies the id,   */
 /* and the platform supplies the data directory.                                              */
@@ -714,12 +1043,8 @@ function learnerRecordKey(context) {
   return { id };
 }
 
-function takeRecordFile(argv) {
-  const name = takeValue(argv, '--file') ?? 'state';
-  const file = learnerRecordFile(name);
-  if (!file) throw new UsageError('--file must be state or routes');
-  return file;
-}
+/** The mastery record, the one fixed-name learner record file. */
+const STATE_FILE = learnerRecordFile('state');
 
 function takeDataRoot(argv) {
   const explicit = takeValue(argv, '--data-dir');
@@ -742,7 +1067,7 @@ async function recordVersion(target) {
 }
 
 async function runReadLearnerRecord({ argv, context }) {
-  const file = takeRecordFile(argv);
+  const file = STATE_FILE;
   const dataRoot = takeDataRoot(argv);
   assertNoArguments(argv);
   const guard = requireManifest(context);
@@ -781,14 +1106,10 @@ async function runReadLearnerRecord({ argv, context }) {
 }
 
 async function runWriteLearnerRecord({ argv, context, stdin }) {
-  const file = takeRecordFile(argv);
-  const expected = takeValue(argv, '--expected-version');
+  const file = STATE_FILE;
+  const expectedVersion = takeExpectedVersion(argv, { allowMissing: true });
   const dataRoot = takeDataRoot(argv);
   assertNoArguments(argv);
-  if (expected === null) throw new UsageError(`--expected-version is required: the version you read, or the word ${MISSING_VERSION}`);
-  if (expected !== MISSING_VERSION && !isBasis(expected)) {
-    throw new UsageError(`--expected-version must be a 64-character lowercase hex digest or the word ${MISSING_VERSION}`);
-  }
   const guard = requireManifest(context);
   if (guard) return { issues: [guard] };
   const key = learnerRecordKey(context);
@@ -822,7 +1143,6 @@ async function runWriteLearnerRecord({ argv, context, stdin }) {
   if (complete.length) return { issues: complete };
   const text = file.serialize(document);
   const target = learnerRecordPath(dataRoot.root, key.id, file.name);
-  const expectedVersion = expected === MISSING_VERSION ? null : expected;
 
   let current;
   try {
@@ -848,6 +1168,89 @@ async function runWriteLearnerRecord({ argv, context, stdin }) {
     changed: { learnerRecord: file.file },
     result: { file: file.name, path: target, version: sha256(text) },
   };
+}
+
+/**
+ * A personal route read against the graph, plus whether its basis still matches: a stale route
+ * is reported, never re-solved, rewritten or deleted here.
+ */
+function personalExtra(loaded, manifest) {
+  const route = loaded.route;
+  return { basedOn: route?.basedOn ?? null, stale: route ? route.basis !== personalRouteBasis(manifest, route) : null };
+}
+
+function personalContext(dataRoot, context) {
+  const guard = requireManifest(context);
+  if (guard) return { issues: [guard] };
+  const key = learnerRecordKey(context);
+  if (key.issue) return { issues: [key.issue] };
+  if (dataRoot.issue) return { issues: [dataRoot.issue] };
+  return { dataRoot: dataRoot.root, workspaceId: key.id };
+}
+
+async function runListPersonalRoutes({ argv, context }) {
+  const place = personalContext(takeDataRoot(argv), context);
+  assertNoArguments(argv);
+  if (place.issues) return { issues: place.issues };
+  const directory = personalRoutesDirectory(place.dataRoot, place.workspaceId);
+  const listed = await listRouteFiles(directory);
+  const routes = [];
+  for (const file of listed.files) {
+    const loaded = await loadRouteFile(file.path, { location: 'personal', fileName: file.name, manifest: context.manifest, label: file.label });
+    routes.push(routeSummary(file, loaded, personalExtra(loaded, context.manifest)));
+  }
+  return { result: { directory, routes }, issues: listed.issues };
+}
+
+async function runReadPersonalRoute({ argv, context }) {
+  const dataRoot = takeDataRoot(argv);
+  const id = takeRouteId(argv);
+  assertNoArguments(argv);
+  const place = personalContext(dataRoot, context);
+  const bad = routeIdIssue(id);
+  if (bad) return { issues: [bad] };
+  if (place.issues) return { issues: place.issues };
+  const target = personalRoutePath(place.dataRoot, place.workspaceId, id);
+  const loaded = await loadRouteFile(target, { location: 'personal', manifest: context.manifest, label: target });
+  return {
+    result: { id, path: target, present: loaded.present, version: loaded.version, text: loaded.text, stale: personalExtra(loaded, context.manifest).stale, reading: loaded.reading },
+    issues: loaded.errors,
+  };
+}
+
+async function runWritePersonalRoute({ argv, context, stdin }) {
+  const expected = takeExpectedVersion(argv, { allowMissing: true });
+  const dataRoot = takeDataRoot(argv);
+  const id = takeRouteId(argv);
+  assertNoArguments(argv);
+  const place = personalContext(dataRoot, context);
+  const bad = routeIdIssue(id);
+  if (bad) return { issues: [bad] };
+  if (place.issues) return { issues: place.issues };
+  const target = personalRoutePath(place.dataRoot, place.workspaceId, id);
+  const prepared = prepareRoute(stdin, { location: 'personal', id, manifest: context.manifest, label: target });
+  if (prepared.issues) return { issues: prepared.issues };
+  const issues = await replaceRouteFile(target, prepared.text, expected, { temporaryDirectory: path.dirname(target), label: target });
+  if (issues.length) return { issues };
+  return {
+    changed: { learnerRecord: `routes/${routeFileName(id)}` },
+    result: { id, path: target, version: sha256(prepared.text), reading: prepared.reading },
+  };
+}
+
+async function runDeletePersonalRoute({ argv, context }) {
+  const expected = takeExpectedVersion(argv, { allowMissing: false });
+  const dataRoot = takeDataRoot(argv);
+  const id = takeRouteId(argv);
+  assertNoArguments(argv);
+  const place = personalContext(dataRoot, context);
+  const bad = routeIdIssue(id);
+  if (bad) return { issues: [bad] };
+  if (place.issues) return { issues: place.issues };
+  const target = personalRoutePath(place.dataRoot, place.workspaceId, id);
+  const issues = await removeRouteFile(target, expected, target);
+  if (issues.length) return { issues };
+  return { changed: { learnerRecord: `routes/${routeFileName(id)}` }, result: { id, path: target } };
 }
 
 /* --------------------------------------------------------------------------------------- */

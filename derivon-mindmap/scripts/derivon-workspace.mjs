@@ -109,7 +109,7 @@ function capabilities() {
         { name: 'status', description: 'ok, or diagnostics when issues is non-empty.' },
         { name: 'capability', description: 'The capability the command exercised.' },
         { name: 'artifact', description: 'Which artifact category the command belongs to.' },
-        { name: 'changed', description: 'What the call changed: manifest, objects, documents, learnerRecord.' },
+        { name: 'changed', description: 'What the call changed: manifest, objects, documents, routes (workspace route ids), learnerRecord (the record file, relative to the workspace\'s learner-record directory).' },
         { name: 'result', description: 'The command-specific result, or null.' },
         { name: 'issues', description: 'Diagnostics with a stable code, a path and a message.' },
       ],
