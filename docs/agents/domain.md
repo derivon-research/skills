@@ -6,7 +6,7 @@ How the engineering skills should consume this repo's domain documentation when 
 
 - **`GLOSSARY.md`** at the repo root, or
 - **`GLOSSARY-MAP.md`** at the repo root if it exists: it points at one `GLOSSARY.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
+- **`docs/adr/README.md`**: the index, with one line per decision. Read it before the ADRs themselves, then read only the one to three it points at.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 
@@ -52,18 +52,20 @@ If your output contradicts an existing ADR, surface it explicitly rather than si
 
 ## Shared vocabulary across the organisation
 
-Core terms are shared across every `derivon-research` repo. Each repo's `GLOSSARY.md`
-describes only its own layer; it is never normative for another repo. When you need a
-shared term, defer to the artifact that owns it:
-
-| Vocabulary | Normative source |
-| --- | --- |
-| Mathematical model: point, hyperedge, tail, head, closure, derivation, set cost, tree cost, depth cost, bracket | `derivon-research/paper` |
-| Graph protocol `derivon.graph/v1` | `derivon-research/derivon` |
-| Workspace protocol `derivon.workspace/v1`: workspace id, concept, derivation, object document, tag | `derivon-research/derivon-mindmap` |
-| Orientation protocol `derivon.orientation/v1`: orientation configuration, default route seed | `derivon-research/derivon-mindmap` |
-| Route protocol `derivon.route/v1`: route, workspace route (`.derivon/routes/`), personal route (`learner-records/<workspace id>/routes/`) | `derivon-research/derivon-mindmap` |
-| Authoring methodology: problem pressure, problem-led derivation | `derivon-research/skills` (`GLOSSARY.md`) |
+Core terms are shared across every `derivon-research` repo. Which repo is normative for which
+vocabulary is kept in one table, in `docs/agents/domain.md` of `derivon-research/derivon-mindmap`;
+read it before using a shared term. This repo is normative only for authoring methodology (problem pressure, problem-led derivation), in `GLOSSARY.md`.
 
 Do not restate a term owned elsewhere. Link to its source instead. If two sources appear to
 disagree, that is a real defect: surface it rather than picking one.
+
+## Recorded decisions
+
+Before treating a design question as open, check whether one of these indexes already settles
+it. Read the index; open a record only when its one-line title bears on the question.
+
+| Scope | Index |
+| --- | --- |
+| Authoring methodology | `docs/adr/README.md` in this repo |
+| Product semantics, protocols, application architecture | `docs/adr/README.md` in `derivon-research/derivon-mindmap` |
+| Strategy, scope and schedule | *Decisions so far* in the open `wayfinder:map` issue of `derivon-research/planning` (private) |
