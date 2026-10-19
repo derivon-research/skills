@@ -21,6 +21,6 @@ The five canonical roles, each label string equal to its name. See
 
 ### Domain docs
 
-Single-context. `CONTEXT.md` and `docs/adr/` already exist and are normative for authoring
+Single-context. `GLOSSARY.md` and `docs/adr/` already exist and are normative for authoring
 *methodology* (problem pressure, problem-led derivation) only; protocol and model terms are
 owned elsewhere. See `docs/agents/domain.md`.
