@@ -6,7 +6,7 @@ How the engineering skills should consume this repo's domain documentation when 
 
 - **`GLOSSARY.md`** at the repo root, or
 - **`GLOSSARY-MAP.md`** at the repo root if it exists: it points at one `GLOSSARY.md` per context. Read each one relevant to the topic.
-- **`docs/adr/`**: read ADRs that touch the area you're about to work in. In multi-context repos, also check `src/<context>/docs/adr/` for context-scoped decisions.
+- **`docs/adr/README.md`**: the index, with one line per decision. Read it before the ADRs themselves, then read only the one to three it points at.
 
 If any of these files don't exist, **proceed silently**. Don't flag their absence; don't suggest creating them upfront. The `/domain-modeling` skill (reached via `/grill-with-docs` and `/improve-codebase-architecture`) creates them lazily when terms or decisions actually get resolved.
 
@@ -67,3 +67,14 @@ shared term, defer to the artifact that owns it:
 
 Do not restate a term owned elsewhere. Link to its source instead. If two sources appear to
 disagree, that is a real defect: surface it rather than picking one.
+
+## Recorded decisions
+
+Before treating a design question as open, check whether one of these indexes already settles
+it. Read the index; open a record only when its one-line title bears on the question.
+
+| Scope | Index |
+| --- | --- |
+| Authoring methodology | `docs/adr/README.md` in this repo |
+| Product semantics, protocols, application architecture | `docs/adr/README.md` in `derivon-research/derivon-mindmap` |
+| Strategy, scope and schedule | *Decisions so far* in the open `wayfinder:map` issue of `derivon-research/planning` (private) |
