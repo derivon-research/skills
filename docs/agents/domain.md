@@ -52,18 +52,9 @@ If your output contradicts an existing ADR, surface it explicitly rather than si
 
 ## Shared vocabulary across the organisation
 
-Core terms are shared across every `derivon-research` repo. Each repo's `GLOSSARY.md`
-describes only its own layer; it is never normative for another repo. When you need a
-shared term, defer to the artifact that owns it:
-
-| Vocabulary | Normative source |
-| --- | --- |
-| Mathematical model: point, hyperedge, tail, head, closure, derivation, set cost, tree cost, depth cost, bracket | `derivon-research/paper` |
-| Graph protocol `derivon.graph/v1` | `derivon-research/derivon` |
-| Workspace protocol `derivon.workspace/v1`: workspace id, concept, derivation, object document, tag | `derivon-research/derivon-mindmap` |
-| Orientation protocol `derivon.orientation/v1`: orientation configuration, default route seed | `derivon-research/derivon-mindmap` |
-| Route protocol `derivon.route/v1`: route, workspace route (`.derivon/routes/`), personal route (`learner-records/<workspace id>/routes/`) | `derivon-research/derivon-mindmap` |
-| Authoring methodology: problem pressure, problem-led derivation | `derivon-research/skills` (`GLOSSARY.md`) |
+Core terms are shared across every `derivon-research` repo. Which repo is normative for which
+vocabulary is kept in one table, in `docs/agents/domain.md` of `derivon-research/derivon-mindmap`;
+read it before using a shared term. This repo is normative only for authoring methodology (problem pressure, problem-led derivation), in `GLOSSARY.md`.
 
 Do not restate a term owned elsewhere. Link to its source instead. If two sources appear to
 disagree, that is a real defect: surface it rather than picking one.
